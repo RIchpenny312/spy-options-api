@@ -69,18 +69,20 @@ async function fetchSpySpotGex() {
         console.log("🔍 Fetching SPOT GEX...");
         const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/spot-exposures");
 
-        // Debugging: Log API response to see if data is correct
+        // Debugging: Log API response
         console.log("SPY Spot GEX API Response:", response.data);
 
         if (!response.data?.data || !Array.isArray(response.data.data) || response.data.data.length === 0) {
-            throw new Error("Invalid or empty SPOT GEX response format");
+            console.error("❌ Invalid or empty SPOT GEX response format");
+            return [];
         }
 
-        // Extract the latest Spot GEX data
-        const latestData = response.data.data[0];
+        // ✅ Extract the latest timestamp data (most recent first)
+        const latestData = response.data.data.reduce((latest, current) => 
+            new Date(current.time) > new Date(latest.time) ? current : latest
+        );
 
-        // Validate extracted data
-        if (!latestData.time || !latestData.price) {
+        if (!latestData?.time || !latestData?.price) {
             console.error("❌ Missing critical Spot GEX fields in API response", latestData);
             return [];
         }
@@ -358,14 +360,12 @@ async function storeSpySpotGexInDB(data) {
             await client.query(
                 `INSERT INTO spy_spot_gex (symbol, date, price, charm_oi, gamma_oi, vanna_oi, time, ticker, recorded_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-                 ON CONFLICT (symbol, date) 
+                 ON CONFLICT (symbol, time) 
                  DO UPDATE SET 
                      price = EXCLUDED.price,
                      charm_oi = EXCLUDED.charm_oi,
                      gamma_oi = EXCLUDED.gamma_oi,
                      vanna_oi = EXCLUDED.vanna_oi,
-                     time = EXCLUDED.time,
-                     ticker = EXCLUDED.ticker,
                      recorded_at = NOW();`,
                 [item.symbol, item.date, item.price, item.charm_oi, item.gamma_oi, item.vanna_oi, item.time, item.ticker]
             );
