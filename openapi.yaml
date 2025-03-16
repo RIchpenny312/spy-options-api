@@ -1,8 +1,8 @@
-openapi: 3.0.0
+openapi: 3.1.0
 info:
   title: SPY Options API
   description: API for fetching SPY OHLC, IV, Greeks, Market Tide, Spot GEX, and Bid/Ask Volume data.
-  version: 1.1.0
+  version: 1.2.0
 servers:
   - url: https://spy-options-api.onrender.com
 
@@ -10,10 +10,11 @@ paths:
   /api/spy/ohlc:
     get:
       summary: Get SPY OHLC data
+      operationId: getSPYOHLC
       description: Fetch the Open, High, Low, Close (OHLC) data for SPY.
       responses:
-        200:
-          description: Successfully retrieved OHLC data
+        "200":
+          description: Successfully retrieved OHLC data.
           content:
             application/json:
               schema:
@@ -41,10 +42,11 @@ paths:
   /api/spy/spot-gex:
     get:
       summary: Get SPY Spot GEX
+      operationId: getSPYSpotGEX
       description: Fetch the latest SPY Spot Gamma Exposure (GEX) data.
       responses:
-        200:
-          description: Successfully retrieved SPY Spot GEX data
+        "200":
+          description: Successfully retrieved SPY Spot GEX data.
           content:
             application/json:
               schema:
@@ -52,16 +54,12 @@ paths:
                 properties:
                   price:
                     type: number
-                  total_gex:
+                  charm_oi:
                     type: number
-                  call_gex:
+                  gamma_oi:
                     type: number
-                  put_gex:
+                  vanna_oi:
                     type: number
-                  call_volume:
-                    type: integer
-                  put_volume:
-                    type: integer
                   time:
                     type: string
                     format: date-time
@@ -69,10 +67,11 @@ paths:
   /api/spy/iv:
     get:
       summary: Get SPY Implied Volatility (5 DTE)
+      operationId: getSPYIV
       description: Fetch SPY's 5-day DTE implied volatility data.
       responses:
-        200:
-          description: Successfully retrieved IV data
+        "200":
+          description: Successfully retrieved IV data.
           content:
             application/json:
               schema:
@@ -92,10 +91,11 @@ paths:
   /api/spy/market-tide:
     get:
       summary: Get SPY Market Tide Data
+      operationId: getSPYMarketTide
       description: Fetch real-time market tide indicators for SPY.
       responses:
-        200:
-          description: Successfully retrieved market tide data
+        "200":
+          description: Successfully retrieved market tide data.
           content:
             application/json:
               schema:
@@ -122,10 +122,11 @@ paths:
   /api/spy/greeks:
     get:
       summary: Get SPY Greeks by Strike
+      operationId: getSPYGreeks
       description: Fetch top 5 Call GEX and top 5 Put GEX data for SPY.
       responses:
-        200:
-          description: Successfully retrieved Greeks by Strike data
+        "200":
+          description: Successfully retrieved Greeks by Strike data.
           content:
             application/json:
               schema:
@@ -160,10 +161,11 @@ paths:
   /api/spy/option-price-levels:
     get:
       summary: Get SPY Option Price Levels
+      operationId: getSPYOptionPriceLevels
       description: Fetch the top 10 SPY option price levels by volume.
       responses:
-        200:
-          description: Successfully retrieved SPY Option Price Levels
+        "200":
+          description: Successfully retrieved SPY Option Price Levels.
           content:
             application/json:
               schema:
@@ -186,10 +188,11 @@ paths:
   /api/spy/bid-ask-volume:
     get:
       summary: Get SPY Bid/Ask Volume Data
+      operationId: getSPYBidAskVolume
       description: Fetch the bid/ask volume data for SPY, SPX, QQQ, and NDX.
       responses:
-        200:
-          description: Successfully retrieved Bid/Ask Volume data
+        "200":
+          description: Successfully retrieved Bid/Ask Volume data.
           content:
             application/json:
               schema:
@@ -242,9 +245,11 @@ paths:
                     date:
                       type: string
                       format: date
+
   /api/greek-exposure:
     get:
       summary: Fetch the last 5 Greek Exposure records for SPY or SPX
+      operationId: getGreekExposure
       parameters:
         - name: symbol
           in: query
@@ -255,7 +260,7 @@ paths:
           description: The symbol for which to fetch Greek Exposure data (SPY or SPX)
       responses:
         "200":
-          description: Successful response with Greek Exposure data
+          description: Successful response with Greek Exposure data.
           content:
             application/json:
               schema:
@@ -287,7 +292,3 @@ paths:
                     recorded_at:
                       type: string
                       format: date-time
-        "400":
-          description: Invalid request (missing or incorrect symbol)
-        "500":
-          description: Internal server error
