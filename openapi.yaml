@@ -1,0 +1,244 @@
+openapi: 3.0.0
+info:
+  title: SPY Options API
+  description: API for fetching SPY OHLC, IV, Greeks, Market Tide, Spot GEX, and Bid/Ask Volume data.
+  version: 1.1.0
+servers:
+  - url: https://spy-options-api.onrender.com
+
+paths:
+  /api/spy/ohlc:
+    get:
+      summary: Get SPY OHLC data
+      description: Fetch the Open, High, Low, Close (OHLC) data for SPY.
+      responses:
+        200:
+          description: Successfully retrieved OHLC data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  open:
+                    type: number
+                  high:
+                    type: number
+                  low:
+                    type: number
+                  close:
+                    type: number
+                  total_volume:
+                    type: integer
+                  volume:
+                    type: integer
+                  start_time:
+                    type: string
+                    format: date-time
+                  end_time:
+                    type: string
+                    format: date-time
+
+  /api/spy/spot-gex:
+    get:
+      summary: Get SPY Spot GEX
+      description: Fetch the latest SPY Spot Gamma Exposure (GEX) data.
+      responses:
+        200:
+          description: Successfully retrieved SPY Spot GEX data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  price:
+                    type: number
+                  total_gex:
+                    type: number
+                  call_gex:
+                    type: number
+                  put_gex:
+                    type: number
+                  call_volume:
+                    type: integer
+                  put_volume:
+                    type: integer
+                  time:
+                    type: string
+                    format: date-time
+
+  /api/spy/iv:
+    get:
+      summary: Get SPY Implied Volatility (5 DTE)
+      description: Fetch SPY's 5-day DTE implied volatility data.
+      responses:
+        200:
+          description: Successfully retrieved IV data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  implied_move:
+                    type: number
+                  implied_move_perc:
+                    type: number
+                  volatility:
+                    type: number
+                  expiry:
+                    type: string
+                  dte:
+                    type: integer
+
+  /api/spy/market-tide:
+    get:
+      summary: Get SPY Market Tide Data
+      description: Fetch real-time market tide indicators for SPY.
+      responses:
+        200:
+          description: Successfully retrieved market tide data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gamma_tide:
+                    type: number
+                  vanna_tide:
+                    type: number
+                  charm_tide:
+                    type: number
+                  total_gamma:
+                    type: number
+                  total_vanna:
+                    type: number
+                  total_charm:
+                    type: number
+                  price:
+                    type: number
+                  time:
+                    type: string
+                    format: date-time
+
+  /api/spy/greeks:
+    get:
+      summary: Get SPY Greeks by Strike
+      description: Fetch top 5 Call GEX and top 5 Put GEX data for SPY.
+      responses:
+        200:
+          description: Successfully retrieved Greeks by Strike data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    strike:
+                      type: number
+                    call_gex:
+                      type: number
+                    put_gex:
+                      type: number
+                    call_delta:
+                      type: number
+                    put_delta:
+                      type: number
+                    call_vanna:
+                      type: number
+                    put_vanna:
+                      type: number
+                    call_charm:
+                      type: number
+                    put_charm:
+                      type: number
+                    price:
+                      type: number
+                    time:
+                      type: string
+                      format: date-time
+
+  /api/spy/option-price-levels:
+    get:
+      summary: Get SPY Option Price Levels
+      description: Fetch the top 10 SPY option price levels by volume.
+      responses:
+        200:
+          description: Successfully retrieved SPY Option Price Levels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    price:
+                      type: number
+                    call_volume:
+                      type: integer
+                    put_volume:
+                      type: integer
+                    total_volume:
+                      type: integer
+                    time:
+                      type: string
+                      format: date-time
+
+  /api/spy/bid-ask-volume:
+    get:
+      summary: Get SPY Bid/Ask Volume Data
+      description: Fetch the bid/ask volume data for SPY, SPX, QQQ, and NDX.
+      responses:
+        200:
+          description: Successfully retrieved Bid/Ask Volume data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    ticker:
+                      type: string
+                    avg_30_day_call_volume:
+                      type: number
+                    avg_30_day_put_volume:
+                      type: number
+                    avg_3_day_call_volume:
+                      type: number
+                    avg_3_day_put_volume:
+                      type: number
+                    avg_7_day_call_volume:
+                      type: number
+                    avg_7_day_put_volume:
+                      type: number
+                    bearish_premium:
+                      type: number
+                    bullish_premium:
+                      type: number
+                    call_open_interest:
+                      type: integer
+                    put_open_interest:
+                      type: integer
+                    call_premium:
+                      type: number
+                    put_premium:
+                      type: number
+                    call_volume:
+                      type: integer
+                    put_volume:
+                      type: integer
+                    call_volume_ask_side:
+                      type: integer
+                    put_volume_ask_side:
+                      type: integer
+                    call_volume_bid_side:
+                      type: integer
+                    put_volume_bid_side:
+                      type: integer
+                    net_call_premium:
+                      type: number
+                    net_put_premium:
+                      type: number
+                    date:
+                      type: string
+                      format: date

@@ -260,6 +260,45 @@ async function fetchSpyIV() {
     }
 }
 
+// ✅ Fetch SPY and SPX Greek Exposure
+async function fetchGreekExposure(symbol) {
+  try {
+    console.log(`🔍 Fetching ${symbol} Greek Exposure...`);
+    const response = await fetchWithRetry(`https://api.unusualwhales.com/api/stock/${symbol}/greek-exposure`);
+    
+    if (!response.data?.data || !Array.isArray(response.data.data)) {
+      throw new Error(`Invalid ${symbol} Greek Exposure response format`);
+    }
+
+    // Ensure each entry has a date, and sort by date (most recent first)
+    const sortedData = response.data.data
+      .filter(item => item.date) // Ensure we only process entries with a valid date
+      .sort((a, b) => new Date(b.date) - new Date(a.date)) // Sort descending
+      .slice(0, 5); // Select the last 5 records
+
+    if (sortedData.length === 0) {
+      console.warn(`⚠️ No valid data found for ${symbol} Greek Exposure.`);
+      return [];
+    }
+
+    return sortedData.map(item => ({
+      symbol,
+      date: item.date, // ✅ Now explicitly using `date` instead of `time`
+      call_charm: parseFloat(item.call_charm) || 0,
+      call_delta: parseFloat(item.call_delta) || 0,
+      call_gamma: parseFloat(item.call_gamma) || 0,
+      call_vanna: parseFloat(item.call_vanna) || 0,
+      put_charm: parseFloat(item.put_charm) || 0,
+      put_delta: parseFloat(item.put_delta) || 0,
+      put_gamma: parseFloat(item.put_gamma) || 0,
+      put_vanna: parseFloat(item.put_vanna) || 0
+    }));
+  } catch (error) {
+    console.error(`❌ Error fetching ${symbol} Greek Exposure:`, error.message);
+    return [];
+  }
+}
+
 // -----------------------
 // Storage Functions
 // -----------------------
@@ -296,10 +335,19 @@ async function storeSpySpotGexInDB(data) {
   await client.connect();
   try {
     for (const item of data) {
+      const dateValue = item.time ? item.time.split("T")[0] : dayjs().format("YYYY-MM-DD"); // Extract or default to today
+
       await client.query(
-        `INSERT INTO spy_spot_gex (charm_oi, gamma_oi, vanna_oi, price, time, ticker, recorded_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [item.charm_oi, item.gamma_oi, item.vanna_oi, item.price, item.time, item.ticker]
+        `INSERT INTO spy_spot_gex (symbol, date, charm_oi, gamma_oi, vanna_oi, price, recorded_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (symbol, date) 
+         DO UPDATE SET 
+             charm_oi = EXCLUDED.charm_oi,
+             gamma_oi = EXCLUDED.gamma_oi,
+             vanna_oi = EXCLUDED.vanna_oi,
+             price = EXCLUDED.price,
+             recorded_at = NOW();`,
+        [item.ticker || "SPY", dateValue, item.charm_oi, item.gamma_oi, item.vanna_oi, item.price]
       );
     }
     console.log('✅ SPY SPOT GEX Data inserted successfully');
@@ -317,6 +365,9 @@ async function storeSpyOptionPriceLevelsInDB(data) {
   try {
     for (const item of data) {
       console.log("📊 Inserting Option Price Level:", JSON.stringify(item, null, 2));
+      
+      const timeValue = item.time ? item.time : new Date().toISOString(); // Handle null time values
+
       await client.query(
         `INSERT INTO spy_option_price_levels (
             price, call_volume, put_volume, total_volume, time, recorded_at
@@ -334,7 +385,7 @@ async function storeSpyOptionPriceLevelsInDB(data) {
           parseInt(item.call_volume) || 0,
           parseInt(item.put_volume) || 0,
           (parseInt(item.call_volume) || 0) + (parseInt(item.put_volume) || 0),
-          item.time || null
+          timeValue
         ]
       );
     }
@@ -464,89 +515,154 @@ async function storeMarketTideDataInDB(data) {
 
 // Function to store BID ASK Volume Data in DB
 async function storeBidAskVolumeDataInDB(data) {
-    const client = new Client(DB_CONFIG);
-    await client.connect();
-    try {
-        for (const item of data) {
-            console.log(`📊 Inserting BID ASK Volume for ${item.ticker}:`, JSON.stringify(item, null, 2));
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+  try {
+    for (const item of data) {
+      const symbol = item.ticker ? item.ticker.toUpperCase() : "UNKNOWN"; // Fix undefined symbol issue
+      console.log(`📊 Inserting BID ASK Volume for ${symbol}:`, JSON.stringify(item, null, 2));
 
-            await client.query(
-                `INSERT INTO bid_ask_volume_data (
-                    ticker, date, avg_30_day_call_volume, avg_30_day_put_volume, 
-                    avg_3_day_call_volume, avg_3_day_put_volume, avg_7_day_call_volume, avg_7_day_put_volume,
-                    bearish_premium, bullish_premium, call_open_interest, put_open_interest,
-                    call_premium, put_premium, call_volume, put_volume, call_volume_ask_side, put_volume_ask_side,
-                    call_volume_bid_side, put_volume_bid_side, net_call_premium, net_put_premium, recorded_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 
-                    $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW()
-                )
-                ON CONFLICT (ticker, date)
-                DO UPDATE SET 
-                    avg_30_day_call_volume = EXCLUDED.avg_30_day_call_volume,
-                    avg_30_day_put_volume = EXCLUDED.avg_30_day_put_volume,
-                    avg_3_day_call_volume = EXCLUDED.avg_3_day_call_volume,
-                    avg_3_day_put_volume = EXCLUDED.avg_3_day_put_volume,
-                    avg_7_day_call_volume = EXCLUDED.avg_7_day_call_volume,
-                    avg_7_day_put_volume = EXCLUDED.avg_7_day_put_volume,
-                    bearish_premium = EXCLUDED.bearish_premium,
-                    bullish_premium = EXCLUDED.bullish_premium,
-                    call_open_interest = EXCLUDED.call_open_interest,
-                    put_open_interest = EXCLUDED.put_open_interest,
-                    call_premium = EXCLUDED.call_premium,
-                    put_premium = EXCLUDED.put_premium,
-                    call_volume = EXCLUDED.call_volume,
-                    put_volume = EXCLUDED.put_volume,
-                    call_volume_ask_side = EXCLUDED.call_volume_ask_side,
-                    put_volume_ask_side = EXCLUDED.put_volume_ask_side,
-                    call_volume_bid_side = EXCLUDED.call_volume_bid_side,
-                    put_volume_bid_side = EXCLUDED.put_volume_bid_side,
-                    net_call_premium = EXCLUDED.net_call_premium,
-                    net_put_premium = EXCLUDED.net_put_premium,
-                    recorded_at = NOW();`,
-                Object.values(item)
-            );
-        }
-        console.log('✅ BID ASK Volume Data inserted successfully');
-    } catch (error) {
-        console.error('❌ Error inserting BID ASK Volume Data:', error.message);
-    } finally {
-        await client.end();
+      await client.query(
+        `INSERT INTO bid_ask_volume_data (
+            symbol, date, avg_30_day_call_volume, avg_30_day_put_volume, 
+            avg_3_day_call_volume, avg_3_day_put_volume, avg_7_day_call_volume, avg_7_day_put_volume,
+            bearish_premium, bullish_premium, call_open_interest, put_open_interest,
+            call_premium, put_premium, call_volume, put_volume, call_volume_ask_side, put_volume_ask_side,
+            call_volume_bid_side, put_volume_bid_side, net_call_premium, net_put_premium, recorded_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 
+            $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW()
+        )
+        ON CONFLICT (symbol, date)
+        DO UPDATE SET 
+            avg_30_day_call_volume = EXCLUDED.avg_30_day_call_volume,
+            avg_30_day_put_volume = EXCLUDED.avg_30_day_put_volume,
+            avg_3_day_call_volume = EXCLUDED.avg_3_day_call_volume,
+            avg_3_day_put_volume = EXCLUDED.avg_3_day_put_volume,
+            avg_7_day_call_volume = EXCLUDED.avg_7_day_call_volume,
+            avg_7_day_put_volume = EXCLUDED.avg_7_day_put_volume,
+            bearish_premium = EXCLUDED.bearish_premium,
+            bullish_premium = EXCLUDED.bullish_premium,
+            call_open_interest = EXCLUDED.call_open_interest,
+            put_open_interest = EXCLUDED.put_open_interest,
+            call_premium = EXCLUDED.call_premium,
+            put_premium = EXCLUDED.put_premium,
+            call_volume = EXCLUDED.call_volume,
+            put_volume = EXCLUDED.put_volume,
+            call_volume_ask_side = EXCLUDED.call_volume_ask_side,
+            put_volume_ask_side = EXCLUDED.put_volume_ask_side,
+            call_volume_bid_side = EXCLUDED.call_volume_bid_side,
+            put_volume_bid_side = EXCLUDED.put_volume_bid_side,
+            net_call_premium = EXCLUDED.net_call_premium,
+            net_put_premium = EXCLUDED.net_put_premium,
+            recorded_at = NOW();`,
+        [
+          symbol, item.date, item.avg_30_day_call_volume, item.avg_30_day_put_volume,
+          item.avg_3_day_call_volume, item.avg_3_day_put_volume, item.avg_7_day_call_volume, item.avg_7_day_put_volume,
+          item.bearish_premium, item.bullish_premium, item.call_open_interest, item.put_open_interest,
+          item.call_premium, item.put_premium, item.call_volume, item.put_volume,
+          item.call_volume_ask_side, item.put_volume_ask_side,
+          item.call_volume_bid_side, item.put_volume_bid_side,
+          item.net_call_premium, item.net_put_premium
+        ]
+      );
     }
+    console.log('✅ BID ASK Volume Data inserted successfully');
+  } catch (error) {
+    console.error('❌ Error inserting BID ASK Volume Data:', error.message);
+  } finally {
+    await client.end();
+  }
 }
 
 // ✅ Function to store SPY IV Data (5 DTE) in DB
 async function storeSpyIVDataInDB(data) {
-    const client = new Client(DB_CONFIG);
-    await client.connect();
-    try {
-        for (const item of data) {
-            console.log("📊 Inserting SPY IV (5 DTE):", JSON.stringify(item, null, 2));
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+  try {
+    for (const item of data) {
+      console.log("📊 Inserting SPY IV (5 DTE):", JSON.stringify(item, null, 2));
 
-            await client.query(
-                `INSERT INTO spy_iv_5dte (
-                    ticker, date, expiry, dte, implied_move, implied_move_perc, volatility, recorded_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, NOW()
-                )
-                ON CONFLICT (date, expiry)
-                DO UPDATE SET 
-                    implied_move = EXCLUDED.implied_move,
-                    implied_move_perc = EXCLUDED.implied_move_perc,
-                    volatility = EXCLUDED.volatility,
-                    recorded_at = NOW();`,
-                [
-                    item.ticker, item.date, item.expiry, item.dte,
-                    item.implied_move, item.implied_move_perc, item.volatility
-                ]
-            );
-        }
-        console.log('✅ SPY IV (5 DTE) Data inserted successfully');
-    } catch (error) {
-        console.error('❌ Error inserting SPY IV (5 DTE) Data:', error.message);
-    } finally {
-        await client.end();
+      await client.query(
+        `INSERT INTO spy_iv_5dte (
+            symbol, date, expiry, dte, implied_move, implied_move_perc, volatility, recorded_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, NOW()
+        )
+        ON CONFLICT (symbol, date, dte)
+        DO UPDATE SET 
+            implied_move = EXCLUDED.implied_move,
+            implied_move_perc = EXCLUDED.implied_move_perc,
+            volatility = EXCLUDED.volatility,
+            recorded_at = NOW();`,
+        [
+          item.ticker || "SPY", item.date, item.expiry, item.dte,
+          item.implied_move, item.implied_move_perc, item.volatility
+        ]
+      );
     }
+    console.log('✅ SPY IV (5 DTE) Data inserted successfully');
+  } catch (error) {
+    console.error('❌ Error inserting SPY IV (5 DTE) Data:', error.message);
+  } finally {
+    await client.end();
+  }
+}
+
+// ✅ Store SPY and SPX Greek Exposure Data in DB
+async function storeGreekExposureInDB(data) {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+  try {
+    if (!data || data.length === 0) {
+      console.warn("⚠️ No Greek Exposure data to insert. Skipping.");
+      return;
+    }
+
+    // ✅ Keep only the last 5 records
+    const latestData = data.slice(0, 5);
+
+    for (const item of latestData) {
+      console.log(`📊 Inserting ${item.symbol} Greek Exposure for ${item.date}:`, JSON.stringify(item, null, 2));
+
+      await client.query(
+        `INSERT INTO greek_exposure (
+            symbol, date, call_charm, call_delta, call_gamma, call_vanna, 
+            put_charm, put_delta, put_gamma, put_vanna, recorded_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()
+        )
+        ON CONFLICT (symbol, date)
+        DO UPDATE SET 
+            call_charm = EXCLUDED.call_charm,
+            call_delta = EXCLUDED.call_delta,
+            call_gamma = EXCLUDED.call_gamma,
+            call_vanna = EXCLUDED.call_vanna,
+            put_charm = EXCLUDED.put_charm,
+            put_delta = EXCLUDED.put_delta,
+            put_gamma = EXCLUDED.put_gamma,
+            put_vanna = EXCLUDED.put_vanna,
+            recorded_at = NOW();`, // ✅ Updates timestamp
+        [
+          item.symbol,
+          item.date,
+          item.call_charm,
+          item.call_delta,
+          item.call_gamma,
+          item.call_vanna,
+          item.put_charm,
+          item.put_delta,
+          item.put_gamma,
+          item.put_vanna,
+        ]
+      );
+    }
+    console.log('✅ Greek Exposure Data inserted successfully');
+  } catch (error) {
+    console.error('❌ Error inserting Greek Exposure:', error.message);
+  } finally {
+    await client.end();
+  }
 }
 
 // -----------------------
@@ -555,10 +671,11 @@ async function storeSpyIVDataInDB(data) {
 async function main() {
     console.log("🚀 Fetching all datasets...");
 
-    // ✅ Fetch all datasets in parallel
+    // ✅ Fetch all datasets in parallel, including SPY & SPX Greek Exposure
     const [
         ohlcData, spotGexData, greeksByStrikeData, optionPriceLevelsData, marketTideData,
-        bidAskSpy, bidAskSpx, bidAskQqq, bidAskNdx, spyIV5DTE
+        bidAskSpy, bidAskSpx, bidAskQqq, bidAskNdx, spyIV5DTE,
+        greekSpy, greekSpx // Fetch SPY & SPX Greek Exposure
     ] = await Promise.all([
         fetchSpyOhlcData(),
         fetchSpySpotGex(),
@@ -569,10 +686,12 @@ async function main() {
         fetchBidAskVolumeData("SPX"),
         fetchBidAskVolumeData("QQQ"),
         fetchBidAskVolumeData("NDX"),
-        fetchSpyIV() // Fetch SPY IV (5 DTE)
+        fetchSpyIV(), // Fetch SPY IV (5 DTE)
+        fetchGreekExposure("SPY"), // Fetch SPY Greek Exposure
+        fetchGreekExposure("SPX")  // Fetch SPX Greek Exposure
     ]);
 
-    // ✅ Store all datasets in parallel
+    // ✅ Store all datasets in parallel, including SPY & SPX Greek Exposure
     await Promise.all([
         ohlcData.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
         spotGexData.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
@@ -583,7 +702,9 @@ async function main() {
         bidAskSpx.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
         bidAskQqq.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
         bidAskNdx.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
-        spyIV5DTE.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null
+        spyIV5DTE.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
+        greekSpy.length > 0 ? storeGreekExposureInDB(greekSpy) : null,  // Store SPY Greek Exposure
+        greekSpx.length > 0 ? storeGreekExposureInDB(greekSpx) : null   // Store SPX Greek Exposure
     ]);
 
     console.log("✅ All data fetch and storage operations completed successfully.");
