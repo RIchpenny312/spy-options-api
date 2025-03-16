@@ -124,6 +124,33 @@ app.get('/api/greek-exposure', async (req, res) => {
     res.json(data);
 });
 
+// ✅ Fetch the average SPY Spot GEX for the last 15 records
+app.get('/api/spy/spot-gex/average', async (req, res) => {
+    const client = new Client(DB_CONFIG);
+    await client.connect();
+    try {
+        const result = await client.query(`
+            SELECT 
+                AVG(price) AS avg_price,
+                AVG(charm_oi) AS avg_charm_oi,
+                AVG(gamma_oi) AS avg_gamma_oi,
+                AVG(vanna_oi) AS avg_vanna_oi
+            FROM (
+                SELECT price, charm_oi, gamma_oi, vanna_oi
+                FROM spy_spot_gex
+                ORDER BY time DESC
+                LIMIT 15
+            ) subquery;
+        `);
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error("❌ Error fetching average SPY Spot GEX:", error.message);
+        res.status(500).json({ error: "Internal Server Error" });
+    } finally {
+        await client.end();
+    }
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------
