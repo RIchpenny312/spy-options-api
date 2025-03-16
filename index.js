@@ -73,14 +73,11 @@ async function fetchSpySpotGex() {
         console.log("SPY Spot GEX API Response:", response.data);
 
         if (!response.data?.data || !Array.isArray(response.data.data) || response.data.data.length === 0) {
-            console.error("❌ Invalid or empty SPOT GEX response format");
-            return [];
+            throw new Error("Invalid or empty SPOT GEX response format");
         }
 
-        // ✅ Extract the latest timestamp data (most recent first)
-        const latestData = response.data.data.reduce((latest, current) => 
-            new Date(current.time) > new Date(latest.time) ? current : latest
-        );
+        // ✅ Extract the most recent record
+        const latestData = response.data.data.sort((a, b) => new Date(b.time) - new Date(a.time))[0];
 
         if (!latestData?.time || !latestData?.price) {
             console.error("❌ Missing critical Spot GEX fields in API response", latestData);
