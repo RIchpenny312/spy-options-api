@@ -45,12 +45,16 @@ app.get('/api/spy/ohlc', async (req, res) => {
 });
 
 // 🔹 Fetch SPY Spot GEX (Latest)
-app.get('/api/spy/spot-gex/latest-average', async (req, res) => {
-    const data = await fetchLatestAndAverageSpySpotGex();
-    if (Object.keys(data).length === 0) {
-        return res.status(404).json({ error: "No SPY Spot GEX data available" });
+app.get('/api/spy/spot-gex', async (req, res) => {
+    const data = await fetchData(`
+        SELECT * FROM spy_spot_gex 
+        ORDER BY time DESC 
+        LIMIT 1
+    `);
+    if (data.length === 0) {
+        return res.status(404).json({ error: "No Spot GEX data available" });
     }
-    res.json(data);
+    res.json(data[0]);
 });
 
 // 🔹 Fetch SPY IV (5 DTE)
