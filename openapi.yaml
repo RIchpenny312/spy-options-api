@@ -242,3 +242,52 @@ paths:
                     date:
                       type: string
                       format: date
+  /api/greek-exposure:
+    get:
+      summary: Fetch the last 5 Greek Exposure records for SPY or SPX
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [SPY, SPX]
+          description: The symbol for which to fetch Greek Exposure data (SPY or SPX)
+      responses:
+        "200":
+          description: Successful response with Greek Exposure data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    symbol:
+                      type: string
+                    date:
+                      type: string
+                      format: date
+                    call_charm:
+                      type: number
+                    call_delta:
+                      type: number
+                    call_gamma:
+                      type: number
+                    call_vanna:
+                      type: number
+                    put_charm:
+                      type: number
+                    put_delta:
+                      type: number
+                    put_gamma:
+                      type: number
+                    put_vanna:
+                      type: number
+                    recorded_at:
+                      type: string
+                      format: date-time
+        "400":
+          description: Invalid request (missing or incorrect symbol)
+        "500":
+          description: Internal server error

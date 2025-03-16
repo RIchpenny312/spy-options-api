@@ -107,6 +107,21 @@ app.get('/api/spy/greeks', async (req, res) => {
     res.json(data);
 });
 
+// 🔹 Fetch SPY/SPX Greek Exposure (Last 5 records)
+app.get('/api/greek-exposure', async (req, res) => {
+    const { symbol } = req.query;
+    if (!symbol || !['SPY', 'SPX'].includes(symbol.toUpperCase())) {
+        return res.status(400).json({ error: "Invalid symbol. Use 'SPY' or 'SPX'." });
+    }
+    const data = await fetchData(`
+        SELECT * FROM greek_exposure 
+        WHERE symbol = $1 
+        ORDER BY date DESC 
+        LIMIT 5
+    `, [symbol.toUpperCase()]);
+    res.json(data);
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------
