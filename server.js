@@ -79,14 +79,24 @@ app.get('/api/spy/market-tide', async (req, res) => {
 
 // 🔹 Fetch Bid/Ask Volume Data (Limited to 5)
 app.get('/api/spy/bid-ask-volume', async (req, res) => {
-    const data = await fetchData(`
-        SELECT ticker, call_volume, put_volume, call_volume_ask_side, put_volume_ask_side, 
-               call_volume_bid_side, put_volume_bid_side, date
-        FROM bid_ask_volume_data
-        ORDER BY date DESC
-        LIMIT 5
-    `);
-    res.json(data);
+    const client = new Client(DB_CONFIG);
+    await client.connect();
+    try {
+        const result = await client.query(`
+            SELECT ticker, call_volume, put_volume, 
+                   call_volume_ask_side, put_volume_ask_side, 
+                   call_volume_bid_side, put_volume_bid_side, date
+            FROM bid_ask_volume_data
+            ORDER BY date DESC
+            LIMIT 5;
+        `);
+        res.json(result.rows);
+    } catch (error) {
+        console.error("❌ Error fetching Bid/Ask Volume:", error.message);
+        res.status(500).json({ error: "Internal Server Error" });
+    } finally {
+        await client.end();
+    }
 });
 
 // 🔹 Fetch SPY Option Price Levels
