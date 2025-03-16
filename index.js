@@ -65,25 +65,40 @@ async function fetchSpyOhlcData() {
 
 // ✅ Function to fetch SPY SPOT GEX
 async function fetchSpySpotGex() {
-  try {
-    console.log("🔍 Fetching SPOT GEX...");
-    const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/spot-exposures");
-    if (!response.data?.data) {
-      throw new Error("Invalid SPOT GEX response format");
+    try {
+        console.log("🔍 Fetching SPOT GEX...");
+        const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/spot-exposures");
+
+        // Debugging: Log API response to see if data is correct
+        console.log("SPY Spot GEX API Response:", response.data);
+
+        if (!response.data?.data || !Array.isArray(response.data.data) || response.data.data.length === 0) {
+            throw new Error("Invalid or empty SPOT GEX response format");
+        }
+
+        // Extract the latest Spot GEX data
+        const latestData = response.data.data[0];
+
+        // Validate extracted data
+        if (!latestData.time || !latestData.price) {
+            console.error("❌ Missing critical Spot GEX fields in API response", latestData);
+            return [];
+        }
+
+        return [{
+            symbol: "SPY",
+            date: latestData.time.split("T")[0], // Extract YYYY-MM-DD
+            price: parseFloat(latestData.price) || 0,
+            charm_oi: parseFloat(latestData.charm_per_one_percent_move_oi) || 0,
+            gamma_oi: parseFloat(latestData.gamma_per_one_percent_move_oi) || 0,
+            vanna_oi: parseFloat(latestData.vanna_per_one_percent_move_oi) || 0,
+            time: latestData.time,
+            ticker: latestData.ticker || "SPY"
+        }];
+    } catch (error) {
+        console.error('❌ Error fetching SPY SPOT GEX:', error.message);
+        return [];
     }
-    const item = response.data.data;
-    return [{
-      charm_oi: parseFloat(item.charm_per_one_percent_move_oi) || 0,
-      gamma_oi: parseFloat(item.gamma_per_one_percent_move_oi) || 0,
-      vanna_oi: parseFloat(item.vanna_per_one_percent_move_oi) || 0,
-      price: parseFloat(item.price) || 0,
-      time: item.time || null,
-      ticker: item.ticker || "SPY"
-    }];
-  } catch (error) {
-    console.error('❌ Error fetching SPY SPOT GEX:', error.message);
-    return [];
-  }
 }
 
 // ✅ Function to fetch SPY Greeks by Strike (Top 5 Call GEX & Top 5 Put GEX)
@@ -331,31 +346,36 @@ async function storeSpyOhlcDataInDB(data) {
 
 // Store SPY SPOT GEX Data in DB
 async function storeSpySpotGexInDB(data) {
-  const client = new Client(DB_CONFIG);
-  await client.connect();
-  try {
-    for (const item of data) {
-      const dateValue = item.time ? item.time.split("T")[0] : dayjs().format("YYYY-MM-DD"); // Extract or default to today
+    const client = new Client(DB_CONFIG);
+    await client.connect();
+    try {
+        for (const item of data) {
+            if (!item.time || item.price === 0) {
+                console.warn("⚠️ Skipping invalid SPOT GEX entry:", item);
+                continue;
+            }
 
-      await client.query(
-        `INSERT INTO spy_spot_gex (symbol, date, charm_oi, gamma_oi, vanna_oi, price, recorded_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-         ON CONFLICT (symbol, date) 
-         DO UPDATE SET 
-             charm_oi = EXCLUDED.charm_oi,
-             gamma_oi = EXCLUDED.gamma_oi,
-             vanna_oi = EXCLUDED.vanna_oi,
-             price = EXCLUDED.price,
-             recorded_at = NOW();`,
-        [item.ticker || "SPY", dateValue, item.charm_oi, item.gamma_oi, item.vanna_oi, item.price]
-      );
+            await client.query(
+                `INSERT INTO spy_spot_gex (symbol, date, price, charm_oi, gamma_oi, vanna_oi, time, ticker, recorded_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                 ON CONFLICT (symbol, date) 
+                 DO UPDATE SET 
+                     price = EXCLUDED.price,
+                     charm_oi = EXCLUDED.charm_oi,
+                     gamma_oi = EXCLUDED.gamma_oi,
+                     vanna_oi = EXCLUDED.vanna_oi,
+                     time = EXCLUDED.time,
+                     ticker = EXCLUDED.ticker,
+                     recorded_at = NOW();`,
+                [item.symbol, item.date, item.price, item.charm_oi, item.gamma_oi, item.vanna_oi, item.time, item.ticker]
+            );
+        }
+        console.log('✅ SPY SPOT GEX Data inserted successfully');
+    } catch (error) {
+        console.error('❌ Error inserting SPY SPOT GEX:', error.message);
+    } finally {
+        await client.end();
     }
-    console.log('✅ SPY SPOT GEX Data inserted successfully');
-  } catch (error) {
-    console.error('❌ Error inserting SPY SPOT GEX:', error.message);
-  } finally {
-    await client.end();
-  }
 }
 
 // Store SPY Option Price Levels Data in DB

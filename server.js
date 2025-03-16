@@ -47,12 +47,16 @@ app.get('/api/spy/ohlc', async (req, res) => {
 // 🔹 Fetch SPY Spot GEX (Latest)
 app.get('/api/spy/spot-gex', async (req, res) => {
     const data = await fetchData(`
-        SELECT price, total_gex, call_gex, put_gex, call_volume, put_volume, time
+        SELECT price, charm_oi, gamma_oi, vanna_oi, time 
         FROM spy_spot_gex
+        WHERE price IS NOT NULL
         ORDER BY time DESC
         LIMIT 1
     `);
-    res.json(data[0] || { error: "No Spot GEX data available" });
+    if (data.length === 0) {
+        return res.status(404).json({ error: "No Spot GEX data available" });
+    }
+    res.json(data[0]);
 });
 
 // 🔹 Fetch SPY IV (5 DTE)
