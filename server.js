@@ -44,6 +44,17 @@ app.get('/api/spy/ohlc', async (req, res) => {
     res.json(data);
 });
 
+// 🔹 Fetch SPY Spot GEX (Latest)
+app.get('/api/spy/spot-gex', async (req, res) => {
+    const data = await fetchData(`
+        SELECT price, total_gex, call_gex, put_gex, call_volume, put_volume, time
+        FROM spy_spot_gex
+        ORDER BY time DESC
+        LIMIT 1
+    `);
+    res.json(data[0] || { error: "No Spot GEX data available" });
+});
+
 // 🔹 Fetch SPY IV (5 DTE)
 app.get('/api/spy/iv', async (req, res) => {
     const data = await fetchData(`
@@ -64,17 +75,19 @@ app.get('/api/spy/market-tide', async (req, res) => {
     res.json(data);
 });
 
-// 🔹 Fetch Bid/Ask Volume Data
-app.get('/api/spy/bid-ask', async (req, res) => {
+// 🔹 Fetch Bid/Ask Volume Data (Limited to 5)
+app.get('/api/spy/bid-ask-volume', async (req, res) => {
     const data = await fetchData(`
-        SELECT * FROM bid_ask_volume_data 
-        ORDER BY recorded_at DESC 
-        LIMIT 10
+        SELECT ticker, call_volume, put_volume, call_volume_ask_side, put_volume_ask_side, 
+               call_volume_bid_side, put_volume_bid_side, date
+        FROM bid_ask_volume_data
+        ORDER BY date DESC
+        LIMIT 5
     `);
     res.json(data);
 });
 
-// 🔹 Fetch Option Price Levels
+// 🔹 Fetch SPY Option Price Levels
 app.get('/api/spy/option-price-levels', async (req, res) => {
     const data = await fetchData(`
         SELECT * FROM spy_option_price_levels 
@@ -84,7 +97,7 @@ app.get('/api/spy/option-price-levels', async (req, res) => {
     res.json(data);
 });
 
-// 🔹 Fetch Greeks by Strike
+// 🔹 Fetch SPY Greeks by Strike
 app.get('/api/spy/greeks', async (req, res) => {
     const data = await fetchData(`
         SELECT * FROM spy_greek_exposure_strike 
