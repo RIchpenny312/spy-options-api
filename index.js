@@ -1,7 +1,8 @@
-require('dotenv').config();
-const axios = require('axios');
-const { Client } = require('pg');
-const dayjs = require('dayjs');
+require("dotenv").config();
+const axios = require("axios");
+const { Client } = require("pg");
+const dayjs = require("dayjs");
+const cron = require("node-cron");
 
 // ✅ Load environment variables
 const API_KEY = process.env.API_KEY;
@@ -172,30 +173,26 @@ async function fetchSpyOptionPriceLevels() {
 async function fetchMarketTideData() {
     try {
         console.log("🔍 Fetching Market Tide Data...");
-        const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/market-tide");
+        const response = await fetchWithRetry("https://api.unusualwhales.com/api/market/market-tide?otm_only=false&interval_5m=true");
 
-        if (!response.data?.data) {
+        if (!response.data?.data || !Array.isArray(response.data.data)) {
             throw new Error("Invalid Market Tide response format");
         }
 
-        const marketTide = response.data.data;
-
-        return [{
-            gamma_tide: parseFloat(marketTide.gamma_tide) || 0,
-            vanna_tide: parseFloat(marketTide.vanna_tide) || 0,
-            charm_tide: parseFloat(marketTide.charm_tide) || 0,
-            total_gamma: parseFloat(marketTide.total_gamma) || 0,
-            total_vanna: parseFloat(marketTide.total_vanna) || 0,
-            total_charm: parseFloat(marketTide.total_charm) || 0,
-            price: parseFloat(marketTide.price) || 0,
-            time: marketTide.time || null
-        }];
+        // ✅ Transform data to match database schema
+        return response.data.data.map(item => ({
+            date: item.date,
+            timestamp: item.timestamp,  // Ensure timestamp is captured correctly
+            net_call_premium: parseFloat(item.net_call_premium) || 0,
+            net_put_premium: parseFloat(item.net_put_premium) || 0,
+            net_volume: parseInt(item.net_volume) || 0
+        }));
     } catch (error) {
         if (error.response && error.response.status === 404) {
             console.warn("⚠️ Market Tide API returned 404. Skipping this dataset.");
-            return []; // Return an empty array instead of failing
+            return [];
         }
-        console.error('❌ Error fetching Market Tide Data:', error.message);
+        console.error("❌ Error fetching Market Tide Data:", error.message);
         return [];
     }
 }
@@ -491,43 +488,43 @@ async function storeSpyGreeksByStrikeInDB(data) {
 
 // ✅ Function to store Market Tide Data in DB
 async function storeMarketTideDataInDB(data) {
-  const client = new Client(DB_CONFIG);
-  await client.connect();
-  try {
-    for (const item of data) {
-      console.log("📊 Inserting Market Tide Data:", JSON.stringify(item, null, 2));
-      
-      await client.query(
-        `INSERT INTO spy_market_tide (
-            gamma_tide, vanna_tide, charm_tide, 
-            total_gamma, total_vanna, total_charm, 
-            price, time, recorded_at
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, NOW()
-        )
-        ON CONFLICT (time) 
-        DO UPDATE SET 
-            gamma_tide = EXCLUDED.gamma_tide,
-            vanna_tide = EXCLUDED.vanna_tide,
-            charm_tide = EXCLUDED.charm_tide,
-            total_gamma = EXCLUDED.total_gamma,
-            total_vanna = EXCLUDED.total_vanna,
-            total_charm = EXCLUDED.total_charm,
-            price = EXCLUDED.price,
-            recorded_at = NOW();`,
-        [
-          item.gamma_tide, item.vanna_tide, item.charm_tide, 
-          item.total_gamma, item.total_vanna, item.total_charm, 
-          item.price, item.time
-        ]
-      );
+    if (!data.length) {
+        console.warn("⚠️ No Market Tide data to insert.");
+        return;
     }
-    console.log('✅ Market Tide Data inserted successfully');
-  } catch (error) {
-    console.error('❌ Error inserting Market Tide Data:', error.message);
-  } finally {
-    await client.end();
-  }
+
+    const client = new Client(DB_CONFIG);
+    await client.connect();
+
+    try {
+        console.log("✅ Inserting Market Tide data into DB...");
+
+        for (const entry of data) {
+            console.log("📊 Attempting to insert:", entry); // Debugging log
+
+            await client.query(`
+                INSERT INTO market_tide_data (date, timestamp, net_call_premium, net_put_premium, net_volume, recorded_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (timestamp) DO UPDATE SET 
+                    net_call_premium = EXCLUDED.net_call_premium,
+                    net_put_premium = EXCLUDED.net_put_premium,
+                    net_volume = EXCLUDED.net_volume,
+                    recorded_at = NOW();
+            `, [
+                entry.date,
+                entry.timestamp,
+                entry.net_call_premium,
+                entry.net_put_premium,
+                entry.net_volume
+            ]);
+        }
+
+        console.log("✅ Market Tide data inserted successfully.");
+    } catch (error) {
+        console.error("❌ Error inserting Market Tide Data:", error.message);
+    } finally {
+        await client.end();
+    }
 }
 
 // Function to store BID ASK Volume Data in DB
@@ -686,45 +683,67 @@ async function storeGreekExposureInDB(data) {
 // Main function to fetch and store all SPY datasets
 // -----------------------
 async function main() {
-    console.log("🚀 Fetching all datasets...");
+  console.log("🚀 Fetching all datasets...");
 
-    // ✅ Fetch all datasets in parallel, including SPY & SPX Greek Exposure
+  try {
+    // ✅ Fetch all datasets in parallel
     const [
-        ohlcData, spotGexData, greeksByStrikeData, optionPriceLevelsData, marketTideData,
-        bidAskSpy, bidAskSpx, bidAskQqq, bidAskNdx, spyIV5DTE,
-        greekSpy, greekSpx // Fetch SPY & SPX Greek Exposure
+      ohlcData,
+      spotGexData,
+      greeksByStrikeData,
+      optionPriceLevelsData,
+      marketTideData,
+      bidAskSpy,
+      bidAskSpx,
+      bidAskQqq,
+      bidAskNdx,
+      spyIV5DTE,
+      greekSpy,
+      greekSpx,
     ] = await Promise.all([
-        fetchSpyOhlcData(),
-        fetchSpySpotGex(),
-        fetchSpyGreeksByStrike(),
-        fetchSpyOptionPriceLevels(),
-        fetchMarketTideData(),
-        fetchBidAskVolumeData("SPY"),
-        fetchBidAskVolumeData("SPX"),
-        fetchBidAskVolumeData("QQQ"),
-        fetchBidAskVolumeData("NDX"),
-        fetchSpyIV(), // Fetch SPY IV (5 DTE)
-        fetchGreekExposure("SPY"), // Fetch SPY Greek Exposure
-        fetchGreekExposure("SPX")  // Fetch SPX Greek Exposure
+      fetchSpyOhlcData(),
+      fetchSpySpotGex(),
+      fetchSpyGreeksByStrike(),
+      fetchSpyOptionPriceLevels(),
+      fetchMarketTideData(),
+      fetchBidAskVolumeData("SPY"),
+      fetchBidAskVolumeData("SPX"),
+      fetchBidAskVolumeData("QQQ"),
+      fetchBidAskVolumeData("NDX"),
+      fetchSpyIV(),
+      fetchGreekExposure("SPY"),
+      fetchGreekExposure("SPX"),
     ]);
 
-    // ✅ Store all datasets in parallel, including SPY & SPX Greek Exposure
+    // ✅ Store all datasets in parallel
     await Promise.all([
-        ohlcData.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
-        spotGexData.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
-        optionPriceLevelsData.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
-        greeksByStrikeData.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-        marketTideData.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
-        bidAskSpy.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
-        bidAskSpx.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
-        bidAskQqq.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
-        bidAskNdx.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
-        spyIV5DTE.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
-        greekSpy.length > 0 ? storeGreekExposureInDB(greekSpy) : null,  // Store SPY Greek Exposure
-        greekSpx.length > 0 ? storeGreekExposureInDB(greekSpx) : null   // Store SPX Greek Exposure
+      ohlcData.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
+      spotGexData.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
+      optionPriceLevelsData.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
+      greeksByStrikeData.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
+      marketTideData.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
+      bidAskSpy.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
+      bidAskSpx.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
+      bidAskQqq.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
+      bidAskNdx.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
+      spyIV5DTE.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
+      greekSpy.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
+      greekSpx.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
     ]);
 
     console.log("✅ All data fetch and storage operations completed successfully.");
+  } catch (error) {
+    console.error("❌ Error in main function:", error.message);
+  }
 }
 
+// -----------------------
+// ⏰ Schedule Cron Job (Every 5 Minutes During Market Hours)
+// -----------------------
+cron.schedule("*/5 13-20 * * 1-5", () => {
+  console.log("⏳ Running scheduled fetch...");
+  main();
+});
+
+// 🚀 Run Immediately on Startup
 main();
