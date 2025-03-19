@@ -2,7 +2,6 @@ require("dotenv").config();
 const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
-const cron = require("node-cron");
 
 // ✅ Load environment variables
 const API_KEY = process.env.API_KEY;
@@ -33,6 +32,10 @@ async function fetchWithRetry(url, retries = 3, delay = 5000) {
     }
   }
 }
+
+// -----------------------
+// Fetch Functions
+// -----------------------
 
 // ✅ Function to fetch SPY OHLC Data (5m) for Today
 async function fetchSpyOhlcData() {
@@ -737,13 +740,7 @@ async function main() {
   }
 }
 
-// -----------------------
-// ⏰ Schedule Cron Job (Every 5 Minutes During Market Hours)
-// -----------------------
-cron.schedule("*/5 13-20 * * 1-5", () => {
-  console.log("⏳ Running scheduled fetch...");
+// ✅ Run main only if explicitly called (No `cron` here)
+if (require.main === module) {
   main();
-});
-
-// 🚀 Run Immediately on Startup
-main();
+}
