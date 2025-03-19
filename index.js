@@ -42,15 +42,19 @@ async function fetchSpyOhlcData() {
   try {
     console.log("🔍 Fetching OHLC Data...");
     const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/ohlc/5m");
+
     if (!response.data?.data || !Array.isArray(response.data.data)) {
       throw new Error("Invalid OHLC response format");
     }
+
     const today = dayjs().format("YYYY-MM-DD");
     const filteredData = response.data.data.filter(item => item.start_time.startsWith(today));
+
     if (filteredData.length === 0) {
       console.log("⚠️ No OHLC data found for today. Skipping insertion.");
       return [];
     }
+
     return filteredData.map(item => ({
       open: parseFloat(item.open) || 0,
       high: parseFloat(item.high) || 0,
@@ -62,7 +66,7 @@ async function fetchSpyOhlcData() {
       end_time: item.end_time
     }));
   } catch (error) {
-    console.error('❌ Error fetching OHLC data:', error.message);
+    console.error("❌ Error fetching OHLC data:", error.message);
     return [];
   }
 }
@@ -318,25 +322,40 @@ async function fetchGreekExposure(symbol) {
 
 // Store SPY OHLC Data in DB
 async function storeSpyOhlcDataInDB(data) {
+  if (!data.length) {
+    console.warn("⚠️ No SPY OHLC data to insert.");
+    return;
+  }
+
   const client = new Client(DB_CONFIG);
   await client.connect();
+
   try {
+    console.log("✅ Inserting SPY OHLC data into DB...");
+
     for (const item of data) {
-      const checkQuery = `SELECT COUNT(*) FROM spy_ohlc WHERE start_time = $1`;
-      const result = await client.query(checkQuery, [item.start_time]);
-      if (parseInt(result.rows[0].count) > 0) {
-        console.log(`⚠️ OHLC data for ${item.start_time} already exists. Skipping.`);
-        continue;
-      }
       await client.query(
         `INSERT INTO spy_ohlc (open, high, low, close, total_volume, volume, start_time, end_time, recorded_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+         ON CONFLICT (start_time) DO UPDATE SET 
+           open = EXCLUDED.open, 
+           high = EXCLUDED.high, 
+           low = EXCLUDED.low, 
+           close = EXCLUDED.close, 
+           total_volume = EXCLUDED.total_volume, 
+           volume = EXCLUDED.volume, 
+           recorded_at = NOW();`,
         [item.open, item.high, item.low, item.close, item.total_volume, item.volume, item.start_time, item.end_time]
       );
     }
-    console.log('✅ SPY OHLC Data inserted successfully');
+
+    console.log("✅ SPY OHLC Data inserted successfully.");
+
+    // ✅ Compute and Store the DT Average **AFTER** inserting
+    await fetchAndStoreSpyOhlcAverages(client);
+
   } catch (error) {
-    console.error('❌ Error inserting OHLC data:', error.message);
+    console.error("❌ Error inserting SPY OHLC data:", error.message);
   } finally {
     await client.end();
   }
@@ -725,6 +744,47 @@ async function storeGreekExposureInDB(data) {
 }
 
 // -----------------------
+// Compute and Store Functions
+// -----------------------
+
+// ✅ Compute and Store the DT Average for SPY OHLC
+async function fetchAndStoreSpyOhlcAverages(client) {
+  try {
+    console.log("📊 Computing and inserting SPY OHLC DT Averages...");
+
+    // Ensure client is connected
+    if (!client._connected) {
+      await client.connect();
+    }
+
+    const result = await client.query(`
+      WITH last_18_intervals AS (
+        SELECT close FROM spy_ohlc ORDER BY start_time DESC LIMIT 18
+      )
+      INSERT INTO spy_ohlc_averages (
+        date, latest_close, avg_close, recorded_at
+      )
+      SELECT 
+        CURRENT_DATE,
+        (SELECT close FROM spy_ohlc ORDER BY start_time DESC LIMIT 1),
+        COALESCE(AVG(close), 0),  -- Ensure we handle NULL values properly
+        NOW()
+      FROM last_18_intervals
+      ON CONFLICT (date) DO UPDATE SET 
+        latest_close = EXCLUDED.latest_close,
+        avg_close = EXCLUDED.avg_close,
+        recorded_at = NOW()
+      RETURNING *; -- ✅ Debugging: See what gets inserted
+    `);
+
+    console.log("✅ SPY OHLC DT Averages inserted successfully:", result.rows);
+
+  } catch (error) {
+    console.error("❌ Error inserting SPY OHLC DT Averages:", error.message);
+  }
+}
+
+// -----------------------
 // Main function to fetch and store all SPY datasets
 // -----------------------
 async function main() {
@@ -760,19 +820,13 @@ async function main() {
       fetchGreekExposure("SPX"),
     ]);
 
-    // ✅ Debug API Responses
-    console.log("📊 Debugging API Responses:");
-    console.log("OHLC Data:", ohlcData);
-    console.log("Spot GEX Data:", spotGexData);
-    console.log("Greeks Data:", greeksByStrikeData);
-    console.log("Market Tide Data:", marketTideData);
-
     // ✅ Store all datasets in parallel
     await Promise.all([
       ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
       spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
       optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
       greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
+      marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
       bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
       bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
       bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
@@ -781,15 +835,6 @@ async function main() {
       greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
       greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
     ]);
-
-    // ✅ Ensure Market Tide Averages are computed and stored
-    if (marketTideData?.length > 0) {
-      await storeMarketTideDataInDB(marketTideData);
-      const client = new Client(DB_CONFIG);
-      await client.connect();
-      await fetchAndStoreMarketTideAverages(client);
-      await client.end();
-    }
 
     console.log("✅ All data fetch and storage operations completed successfully.");
   } catch (error) {
