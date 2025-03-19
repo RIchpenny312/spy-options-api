@@ -173,41 +173,29 @@ async function fetchSpyOptionPriceLevels() {
 }
 
 // ✅ Function to fetch Market Tide Data
-async function fetchAndStoreMarketTideAverages(client) {
+async function fetchMarketTideData() {
     try {
-        console.log("📊 Computing and inserting Market Tide Averages...");
+        console.log("🔍 Fetching Market Tide Data...");
+        const response = await fetchWithRetry("https://api.unusualwhales.com/api/market/market-tide?otm_only=false&interval_5m=true");
 
-        await client.query(`
-            WITH last_18_intervals AS (
-                SELECT * FROM market_tide_data ORDER BY timestamp DESC LIMIT 18
-            )
-            INSERT INTO market_tide_averages (
-                date, latest_net_call_premium, latest_net_put_premium, latest_net_volume, 
-                avg_net_call_premium, avg_net_put_premium, avg_net_volume, recorded_at
-            )
-            SELECT 
-                CURRENT_DATE,
-                (SELECT net_call_premium FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
-                (SELECT net_put_premium FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
-                (SELECT net_volume FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
-                AVG(net_call_premium),
-                AVG(net_put_premium),
-                AVG(net_volume),
-                NOW()
-            FROM last_18_intervals
-            ON CONFLICT (date) DO UPDATE SET 
-                latest_net_call_premium = EXCLUDED.latest_net_call_premium,
-                latest_net_put_premium = EXCLUDED.latest_net_put_premium,
-                latest_net_volume = EXCLUDED.latest_net_volume,
-                avg_net_call_premium = EXCLUDED.avg_net_call_premium,
-                avg_net_put_premium = EXCLUDED.avg_net_put_premium,
-                avg_net_volume = EXCLUDED.avg_net_volume,
-                recorded_at = NOW();
-        `);
+        if (!response.data?.data || !Array.isArray(response.data.data)) {
+            throw new Error("Invalid Market Tide response format");
+        }
 
-        console.log("✅ Market Tide Averages inserted successfully.");
+        return response.data.data.map(item => ({
+            date: item.date,
+            timestamp: item.timestamp,
+            net_call_premium: parseFloat(item.net_call_premium) || 0,
+            net_put_premium: parseFloat(item.net_put_premium) || 0,
+            net_volume: parseInt(item.net_volume) || 0
+        }));
     } catch (error) {
-        console.error("❌ Error inserting Market Tide Averages:", error.message);
+        if (error.response && error.response.status === 404) {
+            console.warn("⚠️ Market Tide API returned 404. Skipping this dataset.");
+            return [];
+        }
+        console.error("❌ Error fetching Market Tide Data:", error.message);
+        return [];
     }
 }
 
@@ -500,6 +488,45 @@ async function storeSpyGreeksByStrikeInDB(data) {
     }
 }
 
+// ✅ Function to compute and store Market Tide Averages
+async function fetchAndStoreMarketTideAverages(client) {
+    try {
+        console.log("📊 Computing and inserting Market Tide Averages...");
+
+        await client.query(`
+            WITH last_18_intervals AS (
+                SELECT * FROM market_tide_data ORDER BY timestamp DESC LIMIT 18
+            )
+            INSERT INTO market_tide_averages (
+                date, latest_net_call_premium, latest_net_put_premium, latest_net_volume, 
+                avg_net_call_premium, avg_net_put_premium, avg_net_volume, recorded_at
+            )
+            SELECT 
+                CURRENT_DATE,
+                (SELECT net_call_premium FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
+                (SELECT net_put_premium FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
+                (SELECT net_volume FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
+                AVG(net_call_premium),
+                AVG(net_put_premium),
+                AVG(net_volume),
+                NOW()
+            FROM last_18_intervals
+            ON CONFLICT (date) DO UPDATE SET 
+                latest_net_call_premium = EXCLUDED.latest_net_call_premium,
+                latest_net_put_premium = EXCLUDED.latest_net_put_premium,
+                latest_net_volume = EXCLUDED.latest_net_volume,
+                avg_net_call_premium = EXCLUDED.avg_net_call_premium,
+                avg_net_put_premium = EXCLUDED.avg_net_put_premium,
+                avg_net_volume = EXCLUDED.avg_net_volume,
+                recorded_at = NOW();
+        `);
+
+        console.log("✅ Market Tide Averages inserted successfully.");
+    } catch (error) {
+        console.error("❌ Error inserting Market Tide Averages:", error.message);
+    }
+}
+
 // ✅ Function to store Market Tide Data in DB
 async function storeMarketTideDataInDB(data) {
     if (!data.length) {
@@ -733,21 +760,36 @@ async function main() {
       fetchGreekExposure("SPX"),
     ]);
 
+    // ✅ Debug API Responses
+    console.log("📊 Debugging API Responses:");
+    console.log("OHLC Data:", ohlcData);
+    console.log("Spot GEX Data:", spotGexData);
+    console.log("Greeks Data:", greeksByStrikeData);
+    console.log("Market Tide Data:", marketTideData);
+
     // ✅ Store all datasets in parallel
     await Promise.all([
-      ohlcData.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
-      spotGexData.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
-      optionPriceLevelsData.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
-      greeksByStrikeData.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-      marketTideData.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
-      bidAskSpy.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
-      bidAskSpx.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
-      bidAskQqq.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
-      bidAskNdx.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
-      spyIV5DTE.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
-      greekSpy.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
-      greekSpx.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
+      ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
+      spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
+      optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
+      greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
+      bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
+      bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
+      bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
+      bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
+      spyIV5DTE?.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
+      greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
+      greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
     ]);
+
+    // ✅ Ensure Market Tide Averages are computed and stored
+    if (marketTideData?.length > 0) {
+      await storeMarketTideDataInDB(marketTideData);
+      const client = new Client(DB_CONFIG);
+      await client.connect();
+      await fetchAndStoreMarketTideAverages(client);
+      await client.end();
+    }
 
     console.log("✅ All data fetch and storage operations completed successfully.");
   } catch (error) {
@@ -755,7 +797,7 @@ async function main() {
   }
 }
 
-// ✅ Run main only if explicitly called (No `cron` here)
+// ✅ Run main only if explicitly called
 if (require.main === module) {
   main();
 }
