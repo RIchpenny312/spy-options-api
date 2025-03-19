@@ -175,57 +175,39 @@ async function fetchSpyOptionPriceLevels() {
 // ✅ Function to fetch Market Tide Data
 async function fetchAndStoreMarketTideAverages(client) {
     try {
-        console.log("📊 Calculating latest market tide and 18-interval averages...");
+        console.log("📊 Computing and inserting Market Tide Averages...");
 
-        const query = `
-            WITH last_18 AS (
-                SELECT net_call_premium, net_put_premium, net_volume 
-                FROM market_tide_data 
-                WHERE date = CURRENT_DATE
-                ORDER BY timestamp DESC 
-                LIMIT 18
+        await client.query(`
+            WITH last_18_intervals AS (
+                SELECT * FROM market_tide_data ORDER BY timestamp DESC LIMIT 18
+            )
+            INSERT INTO market_tide_averages (
+                date, latest_net_call_premium, latest_net_put_premium, latest_net_volume, 
+                avg_net_call_premium, avg_net_put_premium, avg_net_volume, recorded_at
             )
             SELECT 
-                (SELECT net_call_premium FROM market_tide_data WHERE date = CURRENT_DATE ORDER BY timestamp DESC LIMIT 1) AS latest_net_call_premium,
-                (SELECT net_put_premium FROM market_tide_data WHERE date = CURRENT_DATE ORDER BY timestamp DESC LIMIT 1) AS latest_net_put_premium,
-                (SELECT net_volume FROM market_tide_data WHERE date = CURRENT_DATE ORDER BY timestamp DESC LIMIT 1) AS latest_net_volume,
-                AVG(net_call_premium) AS avg_net_call_premium,
-                AVG(net_put_premium) AS avg_net_put_premium,
-                AVG(net_volume) AS avg_net_volume
-            FROM last_18;
-        `;
+                CURRENT_DATE,
+                (SELECT net_call_premium FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
+                (SELECT net_put_premium FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
+                (SELECT net_volume FROM market_tide_data ORDER BY timestamp DESC LIMIT 1),
+                AVG(net_call_premium),
+                AVG(net_put_premium),
+                AVG(net_volume),
+                NOW()
+            FROM last_18_intervals
+            ON CONFLICT (date) DO UPDATE SET 
+                latest_net_call_premium = EXCLUDED.latest_net_call_premium,
+                latest_net_put_premium = EXCLUDED.latest_net_put_premium,
+                latest_net_volume = EXCLUDED.latest_net_volume,
+                avg_net_call_premium = EXCLUDED.avg_net_call_premium,
+                avg_net_put_premium = EXCLUDED.avg_net_put_premium,
+                avg_net_volume = EXCLUDED.avg_net_volume,
+                recorded_at = NOW();
+        `);
 
-        const result = await client.query(query);
-
-        if (result.rows.length > 0) {
-            const latestAndAverages = result.rows[0];
-            console.log("📊 Latest & Average Market Tide Data:", latestAndAverages);
-
-            // ✅ Insert or update the calculated averages
-            await client.query(`
-                INSERT INTO market_tide_averages (date, latest_net_call_premium, latest_net_put_premium, latest_net_volume, avg_net_call_premium, avg_net_put_premium, avg_net_volume, recorded_at)
-                VALUES (CURRENT_DATE, $1, $2, $3, $4, $5, $6, NOW())
-                ON CONFLICT (date) DO UPDATE SET 
-                    latest_net_call_premium = EXCLUDED.latest_net_call_premium,
-                    latest_net_put_premium = EXCLUDED.latest_net_put_premium,
-                    latest_net_volume = EXCLUDED.latest_net_volume,
-                    avg_net_call_premium = EXCLUDED.avg_net_call_premium,
-                    avg_net_put_premium = EXCLUDED.avg_net_put_premium,
-                    avg_net_volume = EXCLUDED.avg_net_volume,
-                    recorded_at = NOW();
-            `, [
-                latestAndAverages.latest_net_call_premium,
-                latestAndAverages.latest_net_put_premium,
-                latestAndAverages.latest_net_volume,
-                latestAndAverages.avg_net_call_premium,
-                latestAndAverages.avg_net_put_premium,
-                latestAndAverages.avg_net_volume
-            ]);
-
-            console.log("✅ Market Tide Averages stored successfully.");
-        }
+        console.log("✅ Market Tide Averages inserted successfully.");
     } catch (error) {
-        console.error("❌ Error fetching and storing Market Tide Averages:", error.message);
+        console.error("❌ Error inserting Market Tide Averages:", error.message);
     }
 }
 
@@ -532,7 +514,7 @@ async function storeMarketTideDataInDB(data) {
         console.log("✅ Inserting Market Tide data into DB...");
 
         for (const entry of data) {
-            console.log("📊 Attempting to insert:", entry); // Debugging log
+            console.log("📊 Attempting to insert:", entry);
 
             await client.query(`
                 INSERT INTO market_tide_data (date, timestamp, net_call_premium, net_put_premium, net_volume, recorded_at)
@@ -553,7 +535,7 @@ async function storeMarketTideDataInDB(data) {
 
         console.log("✅ Market Tide data inserted successfully.");
 
-        // ✅ Fetch latest market tide and 18-interval average
+        // ✅ Compute & Store the latest Market Tide Averages
         await fetchAndStoreMarketTideAverages(client);
 
     } catch (error) {
