@@ -173,30 +173,59 @@ async function fetchSpyOptionPriceLevels() {
 }
 
 // ✅ Function to fetch Market Tide Data
-async function fetchMarketTideData() {
+async function fetchAndStoreMarketTideAverages(client) {
     try {
-        console.log("🔍 Fetching Market Tide Data...");
-        const response = await fetchWithRetry("https://api.unusualwhales.com/api/market/market-tide?otm_only=false&interval_5m=true");
+        console.log("📊 Calculating latest market tide and 18-interval averages...");
 
-        if (!response.data?.data || !Array.isArray(response.data.data)) {
-            throw new Error("Invalid Market Tide response format");
+        const query = `
+            WITH last_18 AS (
+                SELECT net_call_premium, net_put_premium, net_volume 
+                FROM market_tide_data 
+                WHERE date = CURRENT_DATE
+                ORDER BY timestamp DESC 
+                LIMIT 18
+            )
+            SELECT 
+                (SELECT net_call_premium FROM market_tide_data WHERE date = CURRENT_DATE ORDER BY timestamp DESC LIMIT 1) AS latest_net_call_premium,
+                (SELECT net_put_premium FROM market_tide_data WHERE date = CURRENT_DATE ORDER BY timestamp DESC LIMIT 1) AS latest_net_put_premium,
+                (SELECT net_volume FROM market_tide_data WHERE date = CURRENT_DATE ORDER BY timestamp DESC LIMIT 1) AS latest_net_volume,
+                AVG(net_call_premium) AS avg_net_call_premium,
+                AVG(net_put_premium) AS avg_net_put_premium,
+                AVG(net_volume) AS avg_net_volume
+            FROM last_18;
+        `;
+
+        const result = await client.query(query);
+
+        if (result.rows.length > 0) {
+            const latestAndAverages = result.rows[0];
+            console.log("📊 Latest & Average Market Tide Data:", latestAndAverages);
+
+            // ✅ Insert or update the calculated averages
+            await client.query(`
+                INSERT INTO market_tide_averages (date, latest_net_call_premium, latest_net_put_premium, latest_net_volume, avg_net_call_premium, avg_net_put_premium, avg_net_volume, recorded_at)
+                VALUES (CURRENT_DATE, $1, $2, $3, $4, $5, $6, NOW())
+                ON CONFLICT (date) DO UPDATE SET 
+                    latest_net_call_premium = EXCLUDED.latest_net_call_premium,
+                    latest_net_put_premium = EXCLUDED.latest_net_put_premium,
+                    latest_net_volume = EXCLUDED.latest_net_volume,
+                    avg_net_call_premium = EXCLUDED.avg_net_call_premium,
+                    avg_net_put_premium = EXCLUDED.avg_net_put_premium,
+                    avg_net_volume = EXCLUDED.avg_net_volume,
+                    recorded_at = NOW();
+            `, [
+                latestAndAverages.latest_net_call_premium,
+                latestAndAverages.latest_net_put_premium,
+                latestAndAverages.latest_net_volume,
+                latestAndAverages.avg_net_call_premium,
+                latestAndAverages.avg_net_put_premium,
+                latestAndAverages.avg_net_volume
+            ]);
+
+            console.log("✅ Market Tide Averages stored successfully.");
         }
-
-        // ✅ Transform data to match database schema
-        return response.data.data.map(item => ({
-            date: item.date,
-            timestamp: item.timestamp,  // Ensure timestamp is captured correctly
-            net_call_premium: parseFloat(item.net_call_premium) || 0,
-            net_put_premium: parseFloat(item.net_put_premium) || 0,
-            net_volume: parseInt(item.net_volume) || 0
-        }));
     } catch (error) {
-        if (error.response && error.response.status === 404) {
-            console.warn("⚠️ Market Tide API returned 404. Skipping this dataset.");
-            return [];
-        }
-        console.error("❌ Error fetching Market Tide Data:", error.message);
-        return [];
+        console.error("❌ Error fetching and storing Market Tide Averages:", error.message);
     }
 }
 
@@ -523,6 +552,10 @@ async function storeMarketTideDataInDB(data) {
         }
 
         console.log("✅ Market Tide data inserted successfully.");
+
+        // ✅ Fetch latest market tide and 18-interval average
+        await fetchAndStoreMarketTideAverages(client);
+
     } catch (error) {
         console.error("❌ Error inserting Market Tide Data:", error.message);
     } finally {
