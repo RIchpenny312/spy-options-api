@@ -208,19 +208,31 @@ async function fetchAndStoreMarketTideRollingAvg(client) {
     try {
         console.log("📊 Computing and inserting Market Tide Rolling Averages...");
 
-        // SQL Query to calculate rolling averages for last 12 and 48 intervals (5-minute each)
+        // SQL Query to calculate rolling averages for last 12 and last 48 intervals
         const query = `
             WITH last_12_intervals AS (
-                SELECT net_call_premium, net_put_premium, net_volume 
-                FROM market_tide_data 
-                ORDER BY timestamp DESC 
-                LIMIT 12
+                SELECT 
+                    AVG(net_call_premium) AS avg_net_call_premium_12_intervals,
+                    AVG(net_put_premium) AS avg_net_put_premium_12_intervals,
+                    AVG(net_volume) AS avg_net_volume_12_intervals
+                FROM (
+                    SELECT net_call_premium, net_put_premium, net_volume
+                    FROM market_tide_data
+                    ORDER BY timestamp DESC
+                    LIMIT 12
+                ) AS last_12
             ),
             last_48_intervals AS (
-                SELECT net_call_premium, net_put_premium, net_volume 
-                FROM market_tide_data 
-                ORDER BY timestamp DESC 
-                LIMIT 48
+                SELECT 
+                    AVG(net_call_premium) AS avg_net_call_premium_48_intervals,
+                    AVG(net_put_premium) AS avg_net_put_premium_48_intervals,
+                    AVG(net_volume) AS avg_net_volume_48_intervals
+                FROM (
+                    SELECT net_call_premium, net_put_premium, net_volume
+                    FROM market_tide_data
+                    ORDER BY timestamp DESC
+                    LIMIT 48
+                ) AS last_48
             )
             INSERT INTO market_tide_rolling_avg (
                 date, timestamp, avg_net_call_premium_12_intervals, avg_net_put_premium_12_intervals, avg_net_volume_12_intervals,
@@ -228,13 +240,14 @@ async function fetchAndStoreMarketTideRollingAvg(client) {
             )
             SELECT 
                 CURRENT_DATE, NOW(),
-                COALESCE((SELECT AVG(net_call_premium) FROM last_12_intervals), 0.0),
-                COALESCE((SELECT AVG(net_put_premium) FROM last_12_intervals), 0.0),
-                COALESCE((SELECT AVG(net_volume) FROM last_12_intervals), 0),
-                COALESCE((SELECT AVG(net_call_premium) FROM last_48_intervals), 0.0),
-                COALESCE((SELECT AVG(net_put_premium) FROM last_48_intervals), 0.0),
-                COALESCE((SELECT AVG(net_volume) FROM last_48_intervals), 0),
+                COALESCE(l12.avg_net_call_premium_12_intervals, 0.0),
+                COALESCE(l12.avg_net_put_premium_12_intervals, 0.0),
+                COALESCE(l12.avg_net_volume_12_intervals, 0),
+                COALESCE(l48.avg_net_call_premium_48_intervals, 0.0),
+                COALESCE(l48.avg_net_put_premium_48_intervals, 0.0),
+                COALESCE(l48.avg_net_volume_48_intervals, 0),
                 NOW()
+            FROM last_12_intervals l12, last_48_intervals l48
             ON CONFLICT (timestamp) DO UPDATE SET 
                 avg_net_call_premium_12_intervals = EXCLUDED.avg_net_call_premium_12_intervals,
                 avg_net_put_premium_12_intervals = EXCLUDED.avg_net_put_premium_12_intervals,
