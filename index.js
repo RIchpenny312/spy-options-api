@@ -208,40 +208,40 @@ async function fetchAndStoreMarketTideRollingAvg(client) {
     try {
         console.log("📊 Computing and inserting Market Tide Rolling Averages...");
 
-        // SQL Query to calculate rolling averages for 1-hour and 4-hour
+        // SQL Query to calculate rolling averages for last 12 and 48 intervals (5-minute each)
         const query = `
-            WITH last_1_hour AS (
-                SELECT * FROM market_tide_data 
-                WHERE timestamp >= NOW() - INTERVAL '1 hour'
-                ORDER BY timestamp DESC
-                LIMIT 12  -- Ensures we only use the last 12 5-minute intervals for 1 hour
+            WITH last_12_intervals AS (
+                SELECT net_call_premium, net_put_premium, net_volume 
+                FROM market_tide_data 
+                ORDER BY timestamp DESC 
+                LIMIT 12
             ),
-            last_4_hours AS (
-                SELECT * FROM market_tide_data 
-                WHERE timestamp >= NOW() - INTERVAL '4 hours'
-                ORDER BY timestamp DESC
-                LIMIT 48  -- Ensures we only use the last 48 5-minute intervals for 4 hours
+            last_48_intervals AS (
+                SELECT net_call_premium, net_put_premium, net_volume 
+                FROM market_tide_data 
+                ORDER BY timestamp DESC 
+                LIMIT 48
             )
             INSERT INTO market_tide_rolling_avg (
-                date, timestamp, avg_net_call_premium_1h, avg_net_put_premium_1h, avg_net_volume_1h,
-                avg_net_call_premium_4h, avg_net_put_premium_4h, avg_net_volume_4h, recorded_at
+                date, timestamp, avg_net_call_premium_12_intervals, avg_net_put_premium_12_intervals, avg_net_volume_12_intervals,
+                avg_net_call_premium_48_intervals, avg_net_put_premium_48_intervals, avg_net_volume_48_intervals, recorded_at
             )
             SELECT 
                 CURRENT_DATE, NOW(),
-                (SELECT AVG(net_call_premium) FROM last_1_hour),
-                (SELECT AVG(net_put_premium) FROM last_1_hour),
-                (SELECT AVG(net_volume) FROM last_1_hour),
-                (SELECT AVG(net_call_premium) FROM last_4_hours),
-                (SELECT AVG(net_put_premium) FROM last_4_hours),
-                (SELECT AVG(net_volume) FROM last_4_hours),
+                COALESCE((SELECT AVG(net_call_premium) FROM last_12_intervals), 0.0),
+                COALESCE((SELECT AVG(net_put_premium) FROM last_12_intervals), 0.0),
+                COALESCE((SELECT AVG(net_volume) FROM last_12_intervals), 0),
+                COALESCE((SELECT AVG(net_call_premium) FROM last_48_intervals), 0.0),
+                COALESCE((SELECT AVG(net_put_premium) FROM last_48_intervals), 0.0),
+                COALESCE((SELECT AVG(net_volume) FROM last_48_intervals), 0),
                 NOW()
             ON CONFLICT (timestamp) DO UPDATE SET 
-                avg_net_call_premium_1h = EXCLUDED.avg_net_call_premium_1h,
-                avg_net_put_premium_1h = EXCLUDED.avg_net_put_premium_1h,
-                avg_net_volume_1h = EXCLUDED.avg_net_volume_1h,
-                avg_net_call_premium_4h = EXCLUDED.avg_net_call_premium_4h,
-                avg_net_put_premium_4h = EXCLUDED.avg_net_put_premium_4h,
-                avg_net_volume_4h = EXCLUDED.avg_net_volume_4h,
+                avg_net_call_premium_12_intervals = EXCLUDED.avg_net_call_premium_12_intervals,
+                avg_net_put_premium_12_intervals = EXCLUDED.avg_net_put_premium_12_intervals,
+                avg_net_volume_12_intervals = EXCLUDED.avg_net_volume_12_intervals,
+                avg_net_call_premium_48_intervals = EXCLUDED.avg_net_call_premium_48_intervals,
+                avg_net_put_premium_48_intervals = EXCLUDED.avg_net_put_premium_48_intervals,
+                avg_net_volume_48_intervals = EXCLUDED.avg_net_volume_48_intervals,
                 recorded_at = NOW();
         `;
 
