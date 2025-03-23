@@ -203,6 +203,54 @@ async function fetchMarketTideData() {
     }
 }
 
+// ✅ Function to fetch and store 1-hour & 4-hour rolling averages of Market Tide Data
+async function fetchAndStoreMarketTideRollingAvg(client) {
+    try {
+        console.log("📊 Computing and inserting Market Tide Rolling Averages...");
+
+        // SQL Query to calculate rolling averages for 1-hour and 4-hour safely
+        const query = `
+            WITH last_1_hour AS (
+                SELECT net_call_premium, net_put_premium, net_volume
+                FROM market_tide_data
+                WHERE timestamp >= NOW() - INTERVAL '1 hour'
+            ),
+            last_4_hours AS (
+                SELECT net_call_premium, net_put_premium, net_volume
+                FROM market_tide_data
+                WHERE timestamp >= NOW() - INTERVAL '4 hours'
+            )
+            INSERT INTO market_tide_rolling_avg (
+                date, timestamp, avg_net_call_premium_1h, avg_net_put_premium_1h, avg_net_volume_1h,
+                avg_net_call_premium_4h, avg_net_put_premium_4h, avg_net_volume_4h, recorded_at
+            )
+            SELECT 
+                CURRENT_DATE, NOW(),
+                COALESCE((SELECT AVG(net_call_premium) FROM last_1_hour WHERE net_call_premium IS NOT NULL), 0.0),
+                COALESCE((SELECT AVG(net_put_premium) FROM last_1_hour WHERE net_put_premium IS NOT NULL), 0.0),
+                COALESCE((SELECT AVG(net_volume) FROM last_1_hour WHERE net_volume IS NOT NULL), 0),
+                COALESCE((SELECT AVG(net_call_premium) FROM last_4_hours WHERE net_call_premium IS NOT NULL), 0.0),
+                COALESCE((SELECT AVG(net_put_premium) FROM last_4_hours WHERE net_put_premium IS NOT NULL), 0.0),
+                COALESCE((SELECT AVG(net_volume) FROM last_4_hours WHERE net_volume IS NOT NULL), 0),
+                NOW()
+            ON CONFLICT (timestamp) DO UPDATE SET
+                avg_net_call_premium_1h = EXCLUDED.avg_net_call_premium_1h,
+                avg_net_put_premium_1h = EXCLUDED.avg_net_put_premium_1h,
+                avg_net_volume_1h = EXCLUDED.avg_net_volume_1h,
+                avg_net_call_premium_4h = EXCLUDED.avg_net_call_premium_4h,
+                avg_net_put_premium_4h = EXCLUDED.avg_net_put_premium_4h,
+                avg_net_volume_4h = EXCLUDED.avg_net_volume_4h,
+                recorded_at = NOW();
+        `;
+
+        await client.query(query);
+        console.log("✅ Market Tide Rolling Averages inserted successfully.");
+
+    } catch (error) {
+        console.error("❌ Error inserting Market Tide Rolling Averages:", error.message);
+    }
+}
+
 // Function to fetch BID ASK Volume data for a given ticker
 async function fetchBidAskVolumeData(ticker) {
     try {
@@ -580,8 +628,6 @@ async function storeMarketTideDataInDB(data) {
         }
 
         console.log("✅ Market Tide data inserted successfully.");
-
-        // ✅ Compute & Store the latest Market Tide Averages
         await fetchAndStoreMarketTideAverages(client);
 
     } catch (error) {
@@ -788,61 +834,84 @@ async function fetchAndStoreSpyOhlcAverages(client) {
 // Main function to fetch and store all SPY datasets
 // -----------------------
 async function main() {
-  console.log("🚀 Fetching all datasets...");
+    console.log("🚀 Fetching all datasets...");
 
-  try {
-    // ✅ Fetch all datasets in parallel
-    const [
-      ohlcData,
-      spotGexData,
-      greeksByStrikeData,
-      optionPriceLevelsData,
-      marketTideData,
-      bidAskSpy,
-      bidAskSpx,
-      bidAskQqq,
-      bidAskNdx,
-      spyIV5DTE,
-      greekSpy,
-      greekSpx,
-    ] = await Promise.all([
-      fetchSpyOhlcData(),
-      fetchSpySpotGex(),
-      fetchSpyGreeksByStrike(),
-      fetchSpyOptionPriceLevels(),
-      fetchMarketTideData(),
-      fetchBidAskVolumeData("SPY"),
-      fetchBidAskVolumeData("SPX"),
-      fetchBidAskVolumeData("QQQ"),
-      fetchBidAskVolumeData("NDX"),
-      fetchSpyIV(),
-      fetchGreekExposure("SPY"),
-      fetchGreekExposure("SPX"),
-    ]);
+    try {
+        // ✅ Fetch all datasets in parallel
+        const [
+            ohlcData,
+            spotGexData,
+            greeksByStrikeData,
+            optionPriceLevelsData,
+            marketTideData,
+            bidAskSpy,
+            bidAskSpx,
+            bidAskQqq,
+            bidAskNdx,
+            spyIV5DTE,
+            greekSpy,
+            greekSpx,
+        ] = await Promise.all([
+            fetchSpyOhlcData(),
+            fetchSpySpotGex(),
+            fetchSpyGreeksByStrike(),
+            fetchSpyOptionPriceLevels(),
+            fetchMarketTideData(),
+            fetchBidAskVolumeData("SPY"),
+            fetchBidAskVolumeData("SPX"),
+            fetchBidAskVolumeData("QQQ"),
+            fetchBidAskVolumeData("NDX"),
+            fetchSpyIV(),
+            fetchGreekExposure("SPY"),
+            fetchGreekExposure("SPX"),
+        ]);
 
-    // ✅ Store all datasets in parallel
-    await Promise.all([
-      ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
-      spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
-      optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
-      greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-      marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
-      bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
-      bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
-      bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
-      bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
-      spyIV5DTE?.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
-      greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
-      greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
-    ]);
+        // ✅ Debug API Responses
+        console.log("📊 Debugging API Responses:");
+        console.log("OHLC Data:", ohlcData);
+        console.log("Spot GEX Data:", spotGexData);
+        console.log("Greeks Data:", greeksByStrikeData);
+        console.log("Market Tide Data:", marketTideData);
 
-    console.log("✅ All data fetch and storage operations completed successfully.");
-  } catch (error) {
-    console.error("❌ Error in main function:", error.message);
-  }
+        // ✅ Store all datasets in parallel
+        await Promise.all([
+            ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
+            spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
+            optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
+            greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
+            bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
+            bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
+            bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
+            bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
+            spyIV5DTE?.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
+            greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
+            greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
+        ]);
+
+        // ✅ Ensure Market Tide Averages and Rolling Averages are computed and stored
+        if (marketTideData?.length > 0) {
+            const client = new Client(DB_CONFIG);
+            await client.connect();
+
+            console.log("✅ Storing Market Tide data...");
+            await storeMarketTideDataInDB(marketTideData);
+
+            console.log("📊 Computing and storing Market Tide Averages...");
+            await fetchAndStoreMarketTideAverages(client);
+
+            console.log("📊 Computing and storing Market Tide Rolling Averages...");
+            await fetchAndStoreMarketTideRollingAvg(client);
+
+            await client.end();
+        }
+
+        console.log("✅ All data fetch and storage operations completed successfully.");
+    } catch (error) {
+        console.error("❌ Error in main function:", error.message);
+    }
 }
 
 // ✅ Run main only if explicitly called
 if (require.main === module) {
-  main();
+    main();
 }
