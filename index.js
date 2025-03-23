@@ -208,17 +208,19 @@ async function fetchAndStoreMarketTideRollingAvg(client) {
     try {
         console.log("📊 Computing and inserting Market Tide Rolling Averages...");
 
-        // SQL Query to calculate rolling averages for 1-hour and 4-hour safely
+        // SQL Query to calculate rolling averages for 1-hour and 4-hour
         const query = `
             WITH last_1_hour AS (
-                SELECT net_call_premium, net_put_premium, net_volume
-                FROM market_tide_data
+                SELECT * FROM market_tide_data 
                 WHERE timestamp >= NOW() - INTERVAL '1 hour'
+                ORDER BY timestamp DESC
+                LIMIT 12  -- Ensures we only use the last 12 5-minute intervals for 1 hour
             ),
             last_4_hours AS (
-                SELECT net_call_premium, net_put_premium, net_volume
-                FROM market_tide_data
+                SELECT * FROM market_tide_data 
                 WHERE timestamp >= NOW() - INTERVAL '4 hours'
+                ORDER BY timestamp DESC
+                LIMIT 48  -- Ensures we only use the last 48 5-minute intervals for 4 hours
             )
             INSERT INTO market_tide_rolling_avg (
                 date, timestamp, avg_net_call_premium_1h, avg_net_put_premium_1h, avg_net_volume_1h,
@@ -226,14 +228,14 @@ async function fetchAndStoreMarketTideRollingAvg(client) {
             )
             SELECT 
                 CURRENT_DATE, NOW(),
-                COALESCE((SELECT AVG(net_call_premium) FROM last_1_hour WHERE net_call_premium IS NOT NULL), 0.0),
-                COALESCE((SELECT AVG(net_put_premium) FROM last_1_hour WHERE net_put_premium IS NOT NULL), 0.0),
-                COALESCE((SELECT AVG(net_volume) FROM last_1_hour WHERE net_volume IS NOT NULL), 0),
-                COALESCE((SELECT AVG(net_call_premium) FROM last_4_hours WHERE net_call_premium IS NOT NULL), 0.0),
-                COALESCE((SELECT AVG(net_put_premium) FROM last_4_hours WHERE net_put_premium IS NOT NULL), 0.0),
-                COALESCE((SELECT AVG(net_volume) FROM last_4_hours WHERE net_volume IS NOT NULL), 0),
+                (SELECT AVG(net_call_premium) FROM last_1_hour),
+                (SELECT AVG(net_put_premium) FROM last_1_hour),
+                (SELECT AVG(net_volume) FROM last_1_hour),
+                (SELECT AVG(net_call_premium) FROM last_4_hours),
+                (SELECT AVG(net_put_premium) FROM last_4_hours),
+                (SELECT AVG(net_volume) FROM last_4_hours),
                 NOW()
-            ON CONFLICT (timestamp) DO UPDATE SET
+            ON CONFLICT (timestamp) DO UPDATE SET 
                 avg_net_call_premium_1h = EXCLUDED.avg_net_call_premium_1h,
                 avg_net_put_premium_1h = EXCLUDED.avg_net_put_premium_1h,
                 avg_net_volume_1h = EXCLUDED.avg_net_volume_1h,
