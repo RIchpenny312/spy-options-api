@@ -90,34 +90,39 @@ paths:
 
   /api/spy/market-tide:
     get:
-      summary: Get SPY Market Tide Data
+      summary: Get SPY Market Tide Rolling Averages
       operationId: getSPYMarketTide
-      description: Fetch real-time market tide indicators for SPY.
+      description: Fetch rolling averages of Market Tide indicators for SPY.
       responses:
         "200":
-          description: Successfully retrieved market tide data.
+          description: Successfully retrieved market tide rolling averages.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  gamma_tide:
+                  avg_net_call_premium_12_intervals:
                     type: number
-                  vanna_tide:
+                    description: Average net call premium over the last 12 intervals (5-minute each).
+                  avg_net_put_premium_12_intervals:
                     type: number
-                  charm_tide:
+                    description: Average net put premium over the last 12 intervals (5-minute each).
+                  avg_net_volume_12_intervals:
                     type: number
-                  total_gamma:
+                    description: Average net volume over the last 12 intervals (5-minute each).
+                  avg_net_call_premium_48_intervals:
                     type: number
-                  total_vanna:
+                    description: Average net call premium over the last 48 intervals (5-minute each).
+                  avg_net_put_premium_48_intervals:
                     type: number
-                  total_charm:
+                    description: Average net put premium over the last 48 intervals (5-minute each).
+                  avg_net_volume_48_intervals:
                     type: number
-                  price:
-                    type: number
-                  time:
+                    description: Average net volume over the last 48 intervals (5-minute each).
+                  recorded_at:
                     type: string
                     format: date-time
+                    description: Timestamp of when the rolling averages were recorded.
 
   /api/spy/greeks:
     get:
