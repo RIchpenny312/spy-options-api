@@ -154,16 +154,24 @@ async function fetchSpyGreeksByStrike() {
 // ✅ Function to fetch SPY Option Price Levels (Top 10 by total volume)
 async function fetchSpyOptionPriceLevels() {
   try {
-    console.log("🔍 Fetching Option Price Levels...");
+    console.log("🔍 Fetching Today’s Option Price Levels...");
     const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/option/stock-price-levels");
     if (!response.data?.data || !Array.isArray(response.data.data)) {
       throw new Error("Invalid Option Price Levels response format");
     }
-    const top10Active = response.data.data
+
+    // Filter to include only today's data
+    const today = new Date().toISOString().split("T")[0];
+    const todayData = response.data.data.filter(item => item.time?.startsWith(today));
+
+    // Sorting by total volume (call + put)
+    const top10Today = todayData
       .sort((a, b) => (parseInt(b.call_volume) + parseInt(b.put_volume)) - (parseInt(a.call_volume) + parseInt(a.put_volume)))
       .slice(0, 10);
-    console.log("📊 Processed Top 10 SPY Option Price Levels:", top10Active);
-    return top10Active.map(item => ({
+
+    console.log("📊 Processed Top 10 SPY Option Price Levels for Today:", top10Today);
+
+    return top10Today.map(item => ({
       price: parseFloat(item.price) || 0,
       call_volume: parseInt(item.call_volume) || 0,
       put_volume: parseInt(item.put_volume) || 0,
@@ -462,8 +470,8 @@ async function storeSpyOptionPriceLevelsInDB(data) {
   await client.connect();
   try {
     for (const item of data) {
-      console.log("📊 Inserting Option Price Level:", JSON.stringify(item, null, 2));
-      
+      console.log("📊 Inserting Today’s Option Price Level:", JSON.stringify(item, null, 2));
+
       const timeValue = item.time ? item.time : new Date().toISOString(); // Handle null time values
 
       await client.query(
@@ -477,7 +485,8 @@ async function storeSpyOptionPriceLevelsInDB(data) {
             call_volume = EXCLUDED.call_volume,
             put_volume = EXCLUDED.put_volume,
             total_volume = EXCLUDED.total_volume,
-            recorded_at = NOW();`,
+            recorded_at = NOW()
+        WHERE EXCLUDED.time::date = CURRENT_DATE;`, // ✅ Ensures updates only for today's data
         [
           parseFloat(item.price) || 0,
           parseInt(item.call_volume) || 0,
@@ -487,7 +496,7 @@ async function storeSpyOptionPriceLevelsInDB(data) {
         ]
       );
     }
-    console.log('✅ SPY Option Price Levels Data inserted successfully');
+    console.log('✅ SPY Option Price Levels Data (Only Today) inserted successfully');
   } catch (error) {
     console.error('❌ Error inserting SPY Option Price Levels:', error.message);
   } finally {
