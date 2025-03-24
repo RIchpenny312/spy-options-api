@@ -156,21 +156,28 @@ async function fetchSpyOptionPriceLevels() {
   try {
     console.log("🔍 Fetching Today’s Option Price Levels...");
     const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/option/stock-price-levels");
+
     if (!response.data?.data || !Array.isArray(response.data.data)) {
       throw new Error("Invalid Option Price Levels response format");
     }
+
+    // 🔍 Debugging: Log response data
+    console.log("🔍 Raw API Data:", JSON.stringify(response.data.data, null, 2));
 
     // Filter to include only today's data
     const today = new Date().toISOString().split("T")[0];
     const todayData = response.data.data.filter(item => item.time?.startsWith(today));
 
-    // Sorting by total volume (call + put)
+    if (todayData.length === 0) {
+      console.warn("⚠️ No SPY Option Price Levels available for today.");
+      return [];
+    }
+
     const top10Today = todayData
       .sort((a, b) => (parseInt(b.call_volume) + parseInt(b.put_volume)) - (parseInt(a.call_volume) + parseInt(a.put_volume)))
       .slice(0, 10);
 
     console.log("📊 Processed Top 10 SPY Option Price Levels for Today:", top10Today);
-
     return top10Today.map(item => ({
       price: parseFloat(item.price) || 0,
       call_volume: parseInt(item.call_volume) || 0,
@@ -182,33 +189,6 @@ async function fetchSpyOptionPriceLevels() {
     console.error('❌ Error fetching SPY Option Price Levels:', error.message);
     return [];
   }
-}
-
-// ✅ Function to fetch Market Tide Data
-async function fetchMarketTideData() {
-    try {
-        console.log("🔍 Fetching Market Tide Data...");
-        const response = await fetchWithRetry("https://api.unusualwhales.com/api/market/market-tide?otm_only=false&interval_5m=true");
-
-        if (!response.data?.data || !Array.isArray(response.data.data)) {
-            throw new Error("Invalid Market Tide response format");
-        }
-
-        return response.data.data.map(item => ({
-            date: item.date,
-            timestamp: item.timestamp,
-            net_call_premium: parseFloat(item.net_call_premium) || 0,
-            net_put_premium: parseFloat(item.net_put_premium) || 0,
-            net_volume: parseInt(item.net_volume) || 0
-        }));
-    } catch (error) {
-        if (error.response && error.response.status === 404) {
-            console.warn("⚠️ Market Tide API returned 404. Skipping this dataset.");
-            return [];
-        }
-        console.error("❌ Error fetching Market Tide Data:", error.message);
-        return [];
-    }
 }
 
 // ✅ Function to fetch and store 1-hour & 4-hour rolling averages of Market Tide Data
