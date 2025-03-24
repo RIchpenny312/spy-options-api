@@ -161,34 +161,56 @@ async function fetchSpyOptionPriceLevels() {
       throw new Error("Invalid Option Price Levels response format");
     }
 
-    // 🔍 Debugging: Log response data
-    console.log("🔍 Raw API Data:", JSON.stringify(response.data.data, null, 2));
+    const today = new Date().toISOString().split("T")[0]; // Get today's date
 
-    // Filter to include only today's data
-    const today = new Date().toISOString().split("T")[0];
-    const todayData = response.data.data.filter(item => item.time?.startsWith(today));
-
-    if (todayData.length === 0) {
-      console.warn("⚠️ No SPY Option Price Levels available for today.");
-      return [];
-    }
-
-    const top10Today = todayData
-      .sort((a, b) => (parseInt(b.call_volume) + parseInt(b.put_volume)) - (parseInt(a.call_volume) + parseInt(a.put_volume)))
-      .slice(0, 10);
-
-    console.log("📊 Processed Top 10 SPY Option Price Levels for Today:", top10Today);
-    return top10Today.map(item => ({
+    // Assign today's date as the time if missing
+    const processedData = response.data.data.map(item => ({
       price: parseFloat(item.price) || 0,
       call_volume: parseInt(item.call_volume) || 0,
       put_volume: parseInt(item.put_volume) || 0,
       total_volume: (parseInt(item.call_volume) || 0) + (parseInt(item.put_volume) || 0),
-      time: item.time || null
+      time: today // Assign today's date since it's missing
     }));
+
+    // Sort and take top 10 by total volume
+    const top10Today = processedData
+      .sort((a, b) => b.total_volume - a.total_volume)
+      .slice(0, 10);
+
+    console.log("📊 Processed Top 10 SPY Option Price Levels for Today:", top10Today);
+    return top10Today;
+
   } catch (error) {
     console.error('❌ Error fetching SPY Option Price Levels:', error.message);
     return [];
   }
+}
+
+// ✅ Function to fetch Market Tide Data
+async function fetchMarketTideData() {
+    try {
+        console.log("🔍 Fetching Market Tide Data...");
+        const response = await fetchWithRetry("https://api.unusualwhales.com/api/market/market-tide?otm_only=false&interval_5m=true");
+
+        if (!response.data?.data || !Array.isArray(response.data.data)) {
+            throw new Error("Invalid Market Tide response format");
+        }
+
+        return response.data.data.map(item => ({
+            date: item.date,
+            timestamp: item.timestamp,
+            net_call_premium: parseFloat(item.net_call_premium) || 0,
+            net_put_premium: parseFloat(item.net_put_premium) || 0,
+            net_volume: parseInt(item.net_volume) || 0
+        }));
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            console.warn("⚠️ Market Tide API returned 404. Skipping this dataset.");
+            return [];
+        }
+        console.error("❌ Error fetching Market Tide Data:", error.message);
+        return [];
+    }
 }
 
 // ✅ Function to fetch and store 1-hour & 4-hour rolling averages of Market Tide Data
@@ -452,8 +474,6 @@ async function storeSpyOptionPriceLevelsInDB(data) {
     for (const item of data) {
       console.log("📊 Inserting Today’s Option Price Level:", JSON.stringify(item, null, 2));
 
-      const timeValue = item.time ? item.time : new Date().toISOString(); // Handle null time values
-
       await client.query(
         `INSERT INTO spy_option_price_levels (
             price, call_volume, put_volume, total_volume, time, recorded_at
@@ -466,13 +486,13 @@ async function storeSpyOptionPriceLevelsInDB(data) {
             put_volume = EXCLUDED.put_volume,
             total_volume = EXCLUDED.total_volume,
             recorded_at = NOW()
-        WHERE EXCLUDED.time::date = CURRENT_DATE;`, // ✅ Ensures updates only for today's data
+        WHERE EXCLUDED.time::date = CURRENT_DATE;`, // ✅ Ensures only today's records are updated
         [
-          parseFloat(item.price) || 0,
-          parseInt(item.call_volume) || 0,
-          parseInt(item.put_volume) || 0,
-          (parseInt(item.call_volume) || 0) + (parseInt(item.put_volume) || 0),
-          timeValue
+          item.price,
+          item.call_volume,
+          item.put_volume,
+          item.total_volume,
+          item.time // ✅ Now always has today's date
         ]
       );
     }
