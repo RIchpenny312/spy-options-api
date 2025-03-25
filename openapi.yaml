@@ -68,7 +68,7 @@ paths:
     get:
       summary: Get SPY Implied Volatility (0 DTE)
       operationId: getSPYIV
-      description: Fetch SPY's same-day (0 DTE) implied volatility data.
+      description: Fetch SPY's 0-day DTE implied volatility data.
       responses:
         "200":
           description: Successfully retrieved IV data.
@@ -77,16 +77,39 @@ paths:
               schema:
                 type: object
                 properties:
-                  implied_move:
-                    type: number
-                  implied_move_perc:
-                    type: number
-                  volatility:
-                    type: number
-                  expiry:
-                    type: string
-                  dte:
-                    type: integer
+                  latest:
+                    type: object
+                    description: The most recent 0 DTE IV data.
+                    properties:
+                      implied_move:
+                        type: number
+                      implied_move_perc:
+                        type: number
+                      volatility:
+                        type: number
+                      expiry:
+                        type: string
+                      dte:
+                        type: integer
+                  last_5:
+                    type: array
+                    description: Last 5 days of 0 DTE IV data for trend comparison.
+                    items:
+                      type: object
+                      properties:
+                        implied_move:
+                          type: number
+                        implied_move_perc:
+                          type: number
+                        volatility:
+                          type: number
+                        expiry:
+                          type: string
+                        dte:
+                          type: integer
+                        date:
+                          type: string
+                          format: date
 
   /api/spy/market-tide:
     get:

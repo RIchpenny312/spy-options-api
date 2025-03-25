@@ -57,14 +57,19 @@ app.get('/api/spy/spot-gex', async (req, res) => {
     res.json(data[0]);
 });
 
-// 🔹 Fetch SPY IV (0 DTE) - Latest + Last 5 Entries
-app.get('/api/spy/iv', async (req, res) => {
-    const data = await fetchData(`
-        SELECT * FROM spy_iv_0dte 
-        ORDER BY date DESC, recorded_at DESC 
-        LIMIT 6
-    `);
-    res.json(data);
+// ✅ Fetch Market Tide Data
+app.get("/api/spy/market-tide", async (req, res) => {
+    try {
+        const data = await fetchData(`
+            SELECT * FROM market_tide_data 
+            ORDER BY timestamp DESC 
+            LIMIT 10
+        `);
+        res.json(data);
+    } catch (error) {
+        console.error("❌ Error fetching Market Tide data:", error.message);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
 });
 
 // 🔹 Fetch Market Tide Data
