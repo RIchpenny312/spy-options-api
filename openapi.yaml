@@ -184,14 +184,14 @@ paths:
                       type: string
                       format: date-time
 
-  /api/spy/option-price-levels:
+  /api/spy/option-price-levels/today:
     get:
-      summary: Get SPY Option Price Levels
-      operationId: getSPYOptionPriceLevels
-      description: Fetch the top 10 SPY option price levels by volume.
+      summary: Get Today's SPY Option Price Levels
+      operationId: getSPYOptionPriceLevelsToday
+      description: Fetch today's SPY option price levels by volume.
       responses:
         "200":
-          description: Successfully retrieved SPY Option Price Levels.
+          description: Successfully retrieved today's SPY Option Price Levels.
           content:
             application/json:
               schema:
@@ -209,7 +209,7 @@ paths:
                       type: integer
                     time:
                       type: string
-                      format: date-time
+                      format: date
 
   /api/spy/bid-ask-volume:
     get:
