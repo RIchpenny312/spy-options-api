@@ -77,6 +77,16 @@ app.get('/api/spy/market-tide', async (req, res) => {
     res.json(data);
 });
 
+// 🔹 Fetch Market Tide Rolling Averages (Last 12 & Last 48 Intervals)
+app.get('/api/spy/market-tide/rolling-avg', async (req, res) => {
+    const data = await fetchData(`
+        SELECT * FROM market_tide_rolling_avg 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    `);
+    res.json(data);
+});
+
 // 🔹 Fetch Bid/Ask Volume Data (Limited to 5)
 app.get('/api/spy/bid-ask-volume', async (req, res) => {
     try {
