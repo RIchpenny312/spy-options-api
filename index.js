@@ -323,7 +323,9 @@ async function fetchSpyIV0DTE() {
         console.log("🔍 Fetching SPY Implied Volatility for 0 DTE...");
         const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/volatility/term-structure");
 
-        if (!response.data?.data || !Array.isArray(response.data.data)) {
+        console.log("Full API Response:", JSON.stringify(response.data, null, 2));
+
+        if (!response.data || !Array.isArray(response.data.data)) {
             throw new Error("Invalid SPY IV response format");
         }
 
@@ -335,14 +337,18 @@ async function fetchSpyIV0DTE() {
             return [];
         }
 
+        function safeParseFloat(value) {
+            return isNaN(parseFloat(value)) ? null : parseFloat(value);
+        }
+
         return [{
             ticker: ivData.ticker || "SPY",
             date: ivData.date || null,
             expiry: ivData.date || null, // Expiry matches date for 0 DTE
             dte: ivData.dte || 0,
-            implied_move: parseFloat(ivData.implied_move) || 0,
-            implied_move_perc: parseFloat(ivData.implied_move_perc) || 0,
-            volatility: parseFloat(ivData.volatility) || 0
+            implied_move: safeParseFloat(ivData.implied_move),
+            implied_move_perc: safeParseFloat(ivData.implied_move_perc),
+            volatility: safeParseFloat(ivData.volatility)
         }];
     } catch (error) {
         console.error("❌ Error fetching SPY IV 0 DTE data:", error.message);
@@ -736,6 +742,10 @@ async function storeSpyIV0DTEDataInDB(data) {
     try {
         console.log("✅ Inserting SPY IV (0 DTE) data into DB...");
 
+        function safeValue(val) {
+            return (val === undefined || val === null) ? null : val;
+        }
+
         for (const item of data) {
             console.log("📊 Inserting:", JSON.stringify(item, null, 2));
 
@@ -747,13 +757,18 @@ async function storeSpyIV0DTEDataInDB(data) {
                 )
                 ON CONFLICT (symbol, date, dte)
                 DO UPDATE SET 
-                    implied_move = EXCLUDED.implied_move,
-                    implied_move_perc = EXCLUDED.implied_move_perc,
-                    volatility = EXCLUDED.volatility,
+                    implied_move = COALESCE(EXCLUDED.implied_move, spy_iv_0dte.implied_move),
+                    implied_move_perc = COALESCE(EXCLUDED.implied_move_perc, spy_iv_0dte.implied_move_perc),
+                    volatility = COALESCE(EXCLUDED.volatility, spy_iv_0dte.volatility),
                     recorded_at = NOW();`,
                 [
-                    item.ticker || "SPY", item.date, item.expiry, item.dte,
-                    item.implied_move, item.implied_move_perc, item.volatility
+                    safeValue(item.ticker),
+                    safeValue(item.date),
+                    safeValue(item.expiry),
+                    safeValue(item.dte),
+                    safeValue(item.implied_move),
+                    safeValue(item.implied_move_perc),
+                    safeValue(item.volatility)
                 ]
             );
         }
@@ -878,7 +893,11 @@ async function main() {
     console.log("🚀 Fetching all datasets...");
 
     try {
-        // ✅ Fetch all datasets in parallel
+        console.log("📢 Calling fetchSpyIV0DTE...");
+        const spyIV0DTE = await fetchSpyIV0DTE();
+        console.log("✅ SPY IV 0 DTE Data Fetched:", spyIV0DTE);
+
+        // Fetch all datasets in parallel
         const [
             ohlcData,
             spotGexData,
@@ -889,7 +908,6 @@ async function main() {
             bidAskSpx,
             bidAskQqq,
             bidAskNdx,
-            spyIV0DTE, // Fetch only 0 DTE IV
             greekSpy,
             greekSpx,
         ] = await Promise.all([
@@ -902,50 +920,20 @@ async function main() {
             fetchBidAskVolumeData("SPX"),
             fetchBidAskVolumeData("QQQ"),
             fetchBidAskVolumeData("NDX"),
-            fetchSpyIV0DTE(), // Only fetching 0 DTE IV
             fetchGreekExposure("SPY"),
             fetchGreekExposure("SPX"),
         ]);
 
-        // ✅ Debug API Responses
-        console.log("📊 Debugging API Responses:");
-        console.log("OHLC Data:", ohlcData);
-        console.log("Spot GEX Data:", spotGexData);
-        console.log("Greeks Data:", greeksByStrikeData);
-        console.log("Market Tide Data:", marketTideData);
-        console.log("SPY IV 0 DTE:", spyIV0DTE);
-
-        // ✅ Store all datasets in parallel
+        // Store all datasets in parallel
         await Promise.all([
             ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
             spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
             optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
             greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-            bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
-            bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
-            bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
-            bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
-            spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null, // Store only 0 DTE IV
+            spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
             greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
             greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
         ]);
-
-        // ✅ Ensure Market Tide Averages and Rolling Averages are computed and stored
-        if (marketTideData?.length > 0) {
-            const client = new Client(DB_CONFIG);
-            await client.connect();
-
-            console.log("✅ Storing Market Tide data...");
-            await storeMarketTideDataInDB(marketTideData);
-
-            console.log("📊 Computing and storing Market Tide Averages...");
-            await fetchAndStoreMarketTideAverages(client);
-
-            console.log("📊 Computing and storing Market Tide Rolling Averages...");
-            await fetchAndStoreMarketTideRollingAvg(client);
-
-            await client.end();
-        }
 
         console.log("✅ All data fetch and storage operations completed successfully.");
     } catch (error) {

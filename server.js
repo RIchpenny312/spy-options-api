@@ -177,6 +177,17 @@ app.get('/api/spy/spot-gex/average', async (req, res) => {
     }
 });
 
+// ✅ Fetch SPY IV Data
+app.get("/api/spy/iv", async (req, res) => {
+    try {
+        const spyIV0DTE = await fetchSpyIV0DTE();
+        res.json({ latest: spyIV0DTE[0] || null, last_5: spyIV0DTE });
+    } catch (error) {
+        console.error("❌ Error fetching SPY IV 0 DTE API:", error.message);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------
