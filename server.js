@@ -57,12 +57,12 @@ app.get('/api/spy/spot-gex', async (req, res) => {
     res.json(data[0]);
 });
 
-// 🔹 Fetch SPY IV (5 DTE)
+// 🔹 Fetch SPY IV (0 DTE) - Latest + Last 5 Entries
 app.get('/api/spy/iv', async (req, res) => {
     const data = await fetchData(`
-        SELECT * FROM spy_iv_5dte 
-        ORDER BY recorded_at DESC 
-        LIMIT 10
+        SELECT * FROM spy_iv_0dte 
+        ORDER BY date DESC, recorded_at DESC 
+        LIMIT 6
     `);
     res.json(data);
 });

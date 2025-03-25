@@ -317,35 +317,35 @@ async function fetchBidAskVolumeData(ticker) {
     }
 }
 
-// ✅ Function to fetch SPY IV for 5 DTE
-async function fetchSpyIV() {
+// ✅ Function to fetch SPY IV for 0 DTE
+async function fetchSpyIV0DTE() {
     try {
-        console.log("🔍 Fetching SPY Implied Volatility for 5 DTE...");
+        console.log("🔍 Fetching SPY Implied Volatility for 0 DTE...");
         const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/volatility/term-structure");
 
         if (!response.data?.data || !Array.isArray(response.data.data)) {
             throw new Error("Invalid SPY IV response format");
         }
 
-        // Filter only the entry with `dte = 5`
-        const ivData = response.data.data.find(item => item.dte === 5);
+        // Filter only the entry with `dte = 0`
+        const ivData = response.data.data.find(item => item.dte === 0);
 
         if (!ivData) {
-            console.warn("⚠️ No IV data found for DTE = 5");
+            console.warn("⚠️ No IV data found for DTE = 0");
             return [];
         }
 
         return [{
             ticker: ivData.ticker || "SPY",
             date: ivData.date || null,
-            expiry: ivData.expiry || null,
-            dte: ivData.dte || 5,
+            expiry: ivData.date || null, // Expiry matches date for 0 DTE
+            dte: ivData.dte || 0,
             implied_move: parseFloat(ivData.implied_move) || 0,
             implied_move_perc: parseFloat(ivData.implied_move_perc) || 0,
             volatility: parseFloat(ivData.volatility) || 0
         }];
     } catch (error) {
-        console.error("❌ Error fetching SPY IV data:", error.message);
+        console.error("❌ Error fetching SPY IV 0 DTE data:", error.message);
         return [];
     }
 }
@@ -723,38 +723,55 @@ async function storeBidAskVolumeDataInDB(data) {
   }
 }
 
-// ✅ Function to store SPY IV Data (5 DTE) in DB
-async function storeSpyIVDataInDB(data) {
-  const client = new Client(DB_CONFIG);
-  await client.connect();
-  try {
-    for (const item of data) {
-      console.log("📊 Inserting SPY IV (5 DTE):", JSON.stringify(item, null, 2));
-
-      await client.query(
-        `INSERT INTO spy_iv_5dte (
-            symbol, date, expiry, dte, implied_move, implied_move_perc, volatility, recorded_at
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, NOW()
-        )
-        ON CONFLICT (symbol, date, dte)
-        DO UPDATE SET 
-            implied_move = EXCLUDED.implied_move,
-            implied_move_perc = EXCLUDED.implied_move_perc,
-            volatility = EXCLUDED.volatility,
-            recorded_at = NOW();`,
-        [
-          item.ticker || "SPY", item.date, item.expiry, item.dte,
-          item.implied_move, item.implied_move_perc, item.volatility
-        ]
-      );
+// ✅ Function to store SPY IV Data (0 DTE) in DB
+async function storeSpyIV0DTEDataInDB(data) {
+    if (!data.length) {
+        console.warn("⚠️ No SPY IV (0 DTE) data to insert.");
+        return;
     }
-    console.log('✅ SPY IV (5 DTE) Data inserted successfully');
-  } catch (error) {
-    console.error('❌ Error inserting SPY IV (5 DTE) Data:', error.message);
-  } finally {
-    await client.end();
-  }
+
+    const client = new Client(DB_CONFIG);
+    await client.connect();
+
+    try {
+        console.log("✅ Inserting SPY IV (0 DTE) data into DB...");
+
+        for (const item of data) {
+            console.log("📊 Inserting:", JSON.stringify(item, null, 2));
+
+            await client.query(
+                `INSERT INTO spy_iv_0dte (
+                    symbol, date, expiry, dte, implied_move, implied_move_perc, volatility, recorded_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, NOW()
+                )
+                ON CONFLICT (symbol, date, dte)
+                DO UPDATE SET 
+                    implied_move = EXCLUDED.implied_move,
+                    implied_move_perc = EXCLUDED.implied_move_perc,
+                    volatility = EXCLUDED.volatility,
+                    recorded_at = NOW();`,
+                [
+                    item.ticker || "SPY", item.date, item.expiry, item.dte,
+                    item.implied_move, item.implied_move_perc, item.volatility
+                ]
+            );
+        }
+
+        console.log("✅ SPY IV (0 DTE) Data inserted successfully.");
+
+        // Fetch the latest 5 records for trend analysis
+        const result = await client.query(
+            `SELECT * FROM spy_iv_0dte ORDER BY date DESC, recorded_at DESC LIMIT 5;`
+        );
+
+        console.log("📊 Last 5 SPY IV (0 DTE) Records:", result.rows);
+
+    } catch (error) {
+        console.error("❌ Error inserting SPY IV (0 DTE) Data:", error.message);
+    } finally {
+        await client.end();
+    }
 }
 
 // ✅ Store SPY and SPX Greek Exposure Data in DB
@@ -872,7 +889,7 @@ async function main() {
             bidAskSpx,
             bidAskQqq,
             bidAskNdx,
-            spyIV5DTE,
+            spyIV0DTE, // Fetch only 0 DTE IV
             greekSpy,
             greekSpx,
         ] = await Promise.all([
@@ -885,7 +902,7 @@ async function main() {
             fetchBidAskVolumeData("SPX"),
             fetchBidAskVolumeData("QQQ"),
             fetchBidAskVolumeData("NDX"),
-            fetchSpyIV(),
+            fetchSpyIV0DTE(), // Only fetching 0 DTE IV
             fetchGreekExposure("SPY"),
             fetchGreekExposure("SPX"),
         ]);
@@ -896,6 +913,7 @@ async function main() {
         console.log("Spot GEX Data:", spotGexData);
         console.log("Greeks Data:", greeksByStrikeData);
         console.log("Market Tide Data:", marketTideData);
+        console.log("SPY IV 0 DTE:", spyIV0DTE);
 
         // ✅ Store all datasets in parallel
         await Promise.all([
@@ -907,7 +925,7 @@ async function main() {
             bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
             bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
             bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null,
-            spyIV5DTE?.length > 0 ? storeSpyIVDataInDB(spyIV5DTE) : null,
+            spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null, // Store only 0 DTE IV
             greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
             greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
         ]);

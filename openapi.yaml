@@ -66,9 +66,9 @@ paths:
 
   /api/spy/iv:
     get:
-      summary: Get SPY Implied Volatility (5 DTE)
+      summary: Get SPY Implied Volatility (0 DTE)
       operationId: getSPYIV
-      description: Fetch SPY's 5-day DTE implied volatility data.
+      description: Fetch SPY's same-day (0 DTE) implied volatility data.
       responses:
         "200":
           description: Successfully retrieved IV data.
