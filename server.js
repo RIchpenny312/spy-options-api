@@ -100,10 +100,11 @@ app.get('/api/spy/bid-ask-volume', async (req, res) => {
 });
 
 // 🔹 Fetch SPY Option Price Levels
-app.get('/api/spy/option-price-levels', async (req, res) => {
+app.get('/api/spy/option-price-levels/today', async (req, res) => {
     const data = await fetchData(`
-        SELECT * FROM spy_option_price_levels 
-        ORDER BY time DESC 
+        SELECT * FROM spy_option_price_levels
+        WHERE time = CURRENT_DATE
+        ORDER BY recorded_at DESC
         LIMIT 10
     `);
     res.json(data);
