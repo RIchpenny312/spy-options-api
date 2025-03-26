@@ -323,13 +323,14 @@ async function fetchSpyIV0DTE() {
         console.log("🔍 Fetching SPY Implied Volatility for 0 DTE...");
         const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/volatility/term-structure");
 
+        // ✅ Log the response
         console.log("Full API Response:", JSON.stringify(response.data, null, 2));
 
-        if (!response.data || !Array.isArray(response.data.data)) {
+        if (!response.data?.data || !Array.isArray(response.data.data)) {
             throw new Error("Invalid SPY IV response format");
         }
 
-        // Filter only the entry with `dte = 0`
+        // ✅ Find `dte = 0`
         const ivData = response.data.data.find(item => item.dte === 0);
 
         if (!ivData) {
@@ -344,7 +345,7 @@ async function fetchSpyIV0DTE() {
         return [{
             ticker: ivData.ticker || "SPY",
             date: ivData.date || null,
-            expiry: ivData.date || null, // Expiry matches date for 0 DTE
+            expiry: ivData.expiry || null,
             dte: ivData.dte || 0,
             implied_move: safeParseFloat(ivData.implied_move),
             implied_move_perc: safeParseFloat(ivData.implied_move_perc),
@@ -775,12 +776,12 @@ async function storeSpyIV0DTEDataInDB(data) {
 
         console.log("✅ SPY IV (0 DTE) Data inserted successfully.");
 
-        // Fetch the latest 5 records for trend analysis
+        // Fetch latest SPY IV data for Custom GPT Analysis
         const result = await client.query(
             `SELECT * FROM spy_iv_0dte ORDER BY date DESC, recorded_at DESC LIMIT 5;`
         );
 
-        console.log("📊 Last 5 SPY IV (0 DTE) Records:", result.rows);
+        console.log("📊 Last 5 SPY IV (0 DTE) Records for Custom GPT Analysis:", result.rows);
 
     } catch (error) {
         console.error("❌ Error inserting SPY IV (0 DTE) Data:", error.message);
