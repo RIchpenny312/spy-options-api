@@ -925,21 +925,28 @@ async function main() {
             fetchGreekExposure("SPX"),
         ]);
 
-        // Store all datasets in parallel
-        await Promise.all([
-            ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
-            spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
-            optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
-            greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-            spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
-            greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
-            greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
-        ]);
+// Store all datasets in parallel
+await Promise.all([
+    ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
+    spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
+    optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
+    greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
+    spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
+    greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
+    greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
 
-        console.log("✅ All data fetch and storage operations completed successfully.");
-    } catch (error) {
-        console.error("❌ Error in main function:", error.message);
-    }
+    // ✅ Added missing storage functions for Market Tide and Bid/Ask Volume
+    marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
+    bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
+    bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
+    bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
+    bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
+]);
+
+console.log("✅ All data fetch and storage operations completed successfully.");
+
+} catch (error) {
+    console.error("❌ Error in main function:", error.message);
 }
 
 // ✅ Run main only if explicitly called
