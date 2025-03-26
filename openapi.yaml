@@ -64,14 +64,14 @@ paths:
                     type: string
                     format: date-time
 
-  /api/spy/iv:
+  /api/spy/iv/0dte:
     get:
       summary: Get SPY Implied Volatility (0 DTE)
-      operationId: getSPYIV
-      description: Fetch SPY's 0-day DTE implied volatility data.
+      operationId: getSPYIV0DTE
+      description: Fetch the latest SPY 0 DTE Implied Volatility data and the last 5 available records.
       responses:
         "200":
-          description: Successfully retrieved IV data.
+          description: Successfully retrieved IV data for SPY (0 DTE).
           content:
             application/json:
               schema:
@@ -79,37 +79,58 @@ paths:
                 properties:
                   latest:
                     type: object
-                    description: The most recent 0 DTE IV data.
                     properties:
-                      implied_move:
-                        type: number
-                      implied_move_perc:
-                        type: number
-                      volatility:
-                        type: number
+                      symbol:
+                        type: string
+                        example: "SPY"
+                      date:
+                        type: string
+                        format: date
+                        example: "2025-03-25"
                       expiry:
                         type: string
+                        format: date
+                        example: "2025-03-25"
                       dte:
                         type: integer
+                        example: 0
+                      implied_move:
+                        type: number
+                        example: 1.7000
+                      implied_move_perc:
+                        type: number
+                        example: 0.00295
+                      volatility:
+                        type: number
+                        example: 0.1751
+                      recorded_at:
+                        type: string
+                        format: date-time
+                        example: "2025-03-26T02:32:00.200Z"
                   last_5:
                     type: array
-                    description: Last 5 days of 0 DTE IV data for trend comparison.
                     items:
                       type: object
                       properties:
+                        symbol:
+                          type: string
+                        date:
+                          type: string
+                          format: date
+                        expiry:
+                          type: string
+                          format: date
+                        dte:
+                          type: integer
                         implied_move:
                           type: number
                         implied_move_perc:
                           type: number
                         volatility:
                           type: number
-                        expiry:
+                        recorded_at:
                           type: string
-                        dte:
-                          type: integer
-                        date:
-                          type: string
-                          format: date
+                          format: date-time
 
   /api/spy/market-tide:
     get:
