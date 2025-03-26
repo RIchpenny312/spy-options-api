@@ -177,7 +177,7 @@ app.get('/api/spy/spot-gex/average', async (req, res) => {
     }
 });
 
-// ✅ Fetch SPY IV Data
+// ✅ Fetch SPY IV Data from the Database (0 DTE)
 app.get("/api/spy/iv/0dte", async (req, res) => {
     try {
         const client = new Client(DB_CONFIG);
