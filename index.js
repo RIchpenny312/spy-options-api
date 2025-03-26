@@ -912,41 +912,79 @@ async function main() {
             greekSpy,
             greekSpx,
         ] = await Promise.all([
-            fetchSpyOhlcData(),
-            fetchSpySpotGex(),
-            fetchSpyGreeksByStrike(),
-            fetchSpyOptionPriceLevels(),
-            fetchMarketTideData(),
-            fetchBidAskVolumeData("SPY"),
-            fetchBidAskVolumeData("SPX"),
-            fetchBidAskVolumeData("QQQ"),
-            fetchBidAskVolumeData("NDX"),
-            fetchGreekExposure("SPY"),
-            fetchGreekExposure("SPX"),
+            fetchSpyOhlcData().catch(error => {
+                console.error("❌ OHLC Fetch Error:", error.message);
+                return [];
+            }),
+            fetchSpySpotGex().catch(error => {
+                console.error("❌ Spot GEX Fetch Error:", error.message);
+                return [];
+            }),
+            fetchSpyGreeksByStrike().catch(error => {
+                console.error("❌ Greeks Fetch Error:", error.message);
+                return [];
+            }),
+            fetchSpyOptionPriceLevels().catch(error => {
+                console.error("❌ Option Price Levels Fetch Error:", error.message);
+                return [];
+            }),
+            fetchMarketTideData().catch(error => {
+                console.error("❌ Market Tide Fetch Error:", error.message);
+                return [];
+            }),
+            fetchBidAskVolumeData("SPY").catch(error => {
+                console.error("❌ Bid/Ask SPY Fetch Error:", error.message);
+                return [];
+            }),
+            fetchBidAskVolumeData("SPX").catch(error => {
+                console.error("❌ Bid/Ask SPX Fetch Error:", error.message);
+                return [];
+            }),
+            fetchBidAskVolumeData("QQQ").catch(error => {
+                console.error("❌ Bid/Ask QQQ Fetch Error:", error.message);
+                return [];
+            }),
+            fetchBidAskVolumeData("NDX").catch(error => {
+                console.error("❌ Bid/Ask NDX Fetch Error:", error.message);
+                return [];
+            }),
+            fetchGreekExposure("SPY").catch(error => {
+                console.error("❌ Greek SPY Fetch Error:", error.message);
+                return [];
+            }),
+            fetchGreekExposure("SPX").catch(error => {
+                console.error("❌ Greek SPX Fetch Error:", error.message);
+                return [];
+            }),
         ]);
 
-// Store all datasets in parallel
-await Promise.all([
-    ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
-    spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
-    optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
-    greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-    spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
-    greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
-    greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
+        // ✅ Debugging: Check if market tide & bid ask data exist
+        console.log("📌 Market Tide Data Before Storing:", marketTideData);
+        console.log("📌 Bid/Ask SPY Data Before Storing:", bidAskSpy);
 
-    // ✅ Added missing storage functions for Market Tide and Bid/Ask Volume
-    marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
-    bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
-    bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
-    bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
-    bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
-]);
+        // Store all datasets in parallel
+        await Promise.all([
+            ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
+            spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
+            optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
+            greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
+            spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
+            greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
+            greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
 
-console.log("✅ All data fetch and storage operations completed successfully.");
+            // ✅ Added missing storage functions for Market Tide and Bid/Ask Volume
+            marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
+            bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
+            bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
+            bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
+            bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
+        ]);
 
-} catch (error) {
-    console.error("❌ Error in main function:", error.message);
+        console.log("✅ All data fetch and storage operations completed successfully.");
+
+    } catch (error) {
+        console.error("❌ Error in main function:", error.message);
+    }
 }
 
 // ✅ Run main only if explicitly called
