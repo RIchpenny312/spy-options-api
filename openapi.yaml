@@ -174,60 +174,91 @@ paths:
 
   /api/spy/market-tide:
     get:
-      summary: Get SPY Market Tide Data
-      operationId: getSPYMarketTide
-      description: Fetch the latest Market Tide data along with rolling averages for SPY.
+      summary: Get the last 10 SPY Market Tide records
+      operationId: getMarketTideList
+      description: Returns the 10 most recent Market Tide records (5-minute intervals)
       responses:
         "200":
-          description: Successfully retrieved market tide data.
+          description: Successfully retrieved list of market tide entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    date:
+                      type: string
+                      format: date
+                    timestamp:
+                      type: string
+                      format: date-time
+                    net_call_premium:
+                      type: number
+                    net_put_premium:
+                      type: number
+                    net_volume:
+                      type: integer
+                    recorded_at:
+                      type: string
+                      format: date-time
+
+  /api/spy/market-tide/latest:
+    get:
+      summary: Get the latest Market Tide data
+      description: Returns the most recent Market Tide record (5-minute interval)
+      responses:
+        "200":
+          description: Latest Market Tide record
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/spy/market-tide/deltas/today:
+    get:
+      summary: Get today's Market Tide delta trends
+      description: Returns all delta trend entries for the current trading day
+      responses:
+        "200":
+          description: Array of delta records with sentiment labels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    timestamp:
+                      type: string
+                      format: date-time
+                    delta_call:
+                      type: number
+                    delta_put:
+                      type: number
+                    delta_volume:
+                      type: integer
+                    sentiment:
+                      type: string
+
+  /api/spy/market-tide/snapshot:
+    get:
+      summary: Get full Market Tide sentiment snapshot
+      description: Combines latest tide, rolling averages, and sentiment delta
+      responses:
+        "200":
+          description: Full snapshot of institutional sentiment
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  latest:
+                  latest_tide:
                     type: object
-                    description: The most recent market tide data.
-                    properties:
-                      net_call_premium:
-                        type: number
-                        description: Net call premium from the latest interval.
-                      net_put_premium:
-                        type: number
-                        description: Net put premium from the latest interval.
-                      net_volume:
-                        type: number
-                        description: Net volume from the latest interval.
-                      timestamp:
-                        type: string
-                        format: date-time
-                        description: Timestamp of the latest market tide data.
-                  rolling_averages:
+                  rolling_avg:
                     type: object
-                    description: Rolling averages for the last 12 and 48 intervals.
-                    properties:
-                      avg_net_call_premium_12_intervals:
-                        type: number
-                        description: Average net call premium over the last 12 intervals (5-minute each).
-                      avg_net_put_premium_12_intervals:
-                        type: number
-                        description: Average net put premium over the last 12 intervals (5-minute each).
-                      avg_net_volume_12_intervals:
-                        type: number
-                        description: Average net volume over the last 12 intervals (5-minute each).
-                      avg_net_call_premium_48_intervals:
-                        type: number
-                        description: Average net call premium over the last 48 intervals (5-minute each).
-                      avg_net_put_premium_48_intervals:
-                        type: number
-                        description: Average net put premium over the last 48 intervals (5-minute each).
-                      avg_net_volume_48_intervals:
-                        type: number
-                        description: Average net volume over the last 48 intervals (5-minute each).
-                      recorded_at:
-                        type: string
-                        format: date-time
-                        description: Timestamp of when the rolling averages were recorded.
+                  latest_delta:
+                    type: object
 
   /api/spy/greeks:
     get:

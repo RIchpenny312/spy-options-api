@@ -284,6 +284,27 @@ async function fetchAndStoreMarketTideRollingAvg(client) {
     }
 }
 
+// Function to fetch Today Market Tide Data
+async function fetchTodayMarketTideDataFromDB() {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  try {
+    const result = await client.query(`
+      SELECT date, timestamp, net_call_premium, net_put_premium, net_volume
+      FROM market_tide_data
+      WHERE date = CURRENT_DATE
+      ORDER BY timestamp ASC;
+    `);
+    return result.rows;
+  } catch (error) {
+    console.error("❌ Error fetching today's Market Tide data:", error.message);
+    return [];
+  } finally {
+    await client.end();
+  }
+}
+
 // Function to fetch BID ASK Volume data for a given ticker
 async function fetchBidAskVolumeData(ticker) {
     try {
@@ -676,6 +697,33 @@ async function storeMarketTideDataInDB(data) {
     }
 }
 
+// ✅ Function to store Market Tide Deltas
+async function storeMarketTideDeltasInDB(deltas) {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  try {
+    console.log("📊 Inserting Market Tide Deltas...");
+    for (const d of deltas) {
+      await client.query(`
+        INSERT INTO market_tide_deltas (timestamp, delta_call, delta_put, delta_volume, sentiment, recorded_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (timestamp) DO UPDATE SET 
+          delta_call = EXCLUDED.delta_call,
+          delta_put = EXCLUDED.delta_put,
+          delta_volume = EXCLUDED.delta_volume,
+          sentiment = EXCLUDED.sentiment,
+          recorded_at = NOW();
+      `, [d.timestamp, d.delta_call, d.delta_put, d.delta_volume, d.sentiment]);
+    }
+    console.log("✅ Market Tide Deltas stored.");
+  } catch (error) {
+    console.error("❌ Error storing Market Tide Deltas:", error.message);
+  } finally {
+    await client.end();
+  }
+}
+
 // Function to store BID ASK Volume Data in DB
 async function storeBidAskVolumeDataInDB(data) {
   const client = new Client(DB_CONFIG);
@@ -1026,6 +1074,39 @@ async function storeDailyOhlcSummary() {
   console.log("✅ Daily OHLC summary updated + version snapshot stored.");
 }
 
+// ✅ Compute Market Tide Deltas
+function computeMarketTideDeltas(data) {
+  return data.map((entry, index) => {
+    if (index === 0) {
+      return {
+        timestamp: entry.timestamp,
+        delta_call: 0,
+        delta_put: 0,
+        delta_volume: 0,
+        sentiment: 'Neutral'
+      };
+    }
+
+    const prev = data[index - 1];
+
+    const delta_call = entry.net_call_premium - prev.net_call_premium;
+    const delta_put = entry.net_put_premium - prev.net_put_premium;
+    const delta_volume = entry.net_volume - prev.net_volume;
+
+    let sentiment = 'Neutral';
+    if (delta_put < 0 && entry.net_put_premium < 0) sentiment = 'Bullish Trend';
+    else if (delta_call < 0 && entry.net_call_premium < 0) sentiment = 'Bearish Trend';
+
+    return {
+      timestamp: entry.timestamp,
+      delta_call,
+      delta_put,
+      delta_volume,
+      sentiment
+    };
+  });
+}
+
 // -----------------------
 // Main function to fetch and store all SPY datasets
 // -----------------------
@@ -1116,6 +1197,13 @@ async function main() {
       bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
       bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
     ]);
+
+    // ✅ New: Compute Delta Trends for Today
+    const todayMarketTideData = await fetchTodayMarketTideDataFromDB();
+    if (todayMarketTideData.length > 1) {
+      const deltas = computeMarketTideDeltas(todayMarketTideData);
+      await storeMarketTideDeltasInDB(deltas);
+    }
 
     // ✅ EOD summary + snapshot
     console.log("📦 Running daily OHLC summary + version snapshot...");

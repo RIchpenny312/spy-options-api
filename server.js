@@ -57,7 +57,7 @@ app.get('/api/spy/spot-gex', async (req, res) => {
     res.json(data[0]);
 });
 
-// ✅ Fetch Market Tide Data
+// ✅ Fetch Last 10 Market Tide Entries
 app.get("/api/spy/market-tide", async (req, res) => {
     try {
         const data = await fetchData(`
@@ -72,16 +72,6 @@ app.get("/api/spy/market-tide", async (req, res) => {
     }
 });
 
-// 🔹 Fetch Market Tide Data
-app.get('/api/spy/market-tide', async (req, res) => {
-    const data = await fetchData(`
-        SELECT * FROM market_tide_data 
-        ORDER BY timestamp DESC 
-        LIMIT 10
-    `);
-    res.json(data);
-});
-
 // 🔹 Fetch Market Tide Rolling Averages (Last 12 & Last 48 Intervals)
 app.get('/api/spy/market-tide/rolling-avg', async (req, res) => {
     const data = await fetchData(`
@@ -90,6 +80,64 @@ app.get('/api/spy/market-tide/rolling-avg', async (req, res) => {
         LIMIT 1
     `);
     res.json(data);
+});
+
+// 🔹 Latest Market Tide (1 record)
+app.get('/api/spy/market-tide/latest', async (req, res) => {
+  const [latest] = await fetchData(`
+    SELECT * FROM market_tide_data 
+    WHERE date = CURRENT_DATE
+    ORDER BY timestamp DESC 
+    LIMIT 1
+  `);
+  if (!latest) return res.status(404).json({ error: "No Market Tide data available" });
+  res.json(latest);
+});
+
+// 🔹 Today's Deltas
+app.get('/api/spy/market-tide/deltas/today', async (req, res) => {
+  const deltas = await fetchData(`
+    SELECT * FROM market_tide_deltas 
+    WHERE timestamp::date = CURRENT_DATE
+    ORDER BY timestamp ASC
+  `);
+  res.json(deltas);
+});
+
+// 🔹 Combined Market Tide Snapshot
+app.get('/api/spy/market-tide/snapshot', async (req, res) => {
+  try {
+    const [latestTide] = await fetchData(`
+      SELECT * FROM market_tide_data 
+      WHERE date = CURRENT_DATE
+      ORDER BY timestamp DESC 
+      LIMIT 1
+    `);
+    const [rollingAvg] = await fetchData(`
+      SELECT * FROM market_tide_rolling_avg 
+      ORDER BY timestamp DESC 
+      LIMIT 1
+    `);
+    const [latestDelta] = await fetchData(`
+      SELECT * FROM market_tide_deltas 
+      WHERE timestamp::date = CURRENT_DATE
+      ORDER BY timestamp DESC 
+      LIMIT 1
+    `);
+
+    if (!latestTide || !rollingAvg || !latestDelta) {
+      return res.status(404).json({ error: "Incomplete Market Tide snapshot" });
+    }
+
+    res.json({
+      latest_tide: latestTide,
+      rolling_avg: rollingAvg,
+      latest_delta: latestDelta
+    });
+  } catch (error) {
+    console.error("❌ Snapshot error:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // 🔹 Fetch Bid/Ask Volume Data (Limited to 5)
