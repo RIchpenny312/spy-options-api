@@ -196,6 +196,75 @@ app.get("/api/spy/iv/0dte", async (req, res) => {
     }
 });
 
+// ✅ Fetch SPY SPY Intraday Summary
+app.get('/api/spy/intraday-summary', async (req, res) => {
+  try {
+    // --- 1. Fetch daily OHLC summary ---
+    const [summary] = await fetchData(`
+      SELECT * FROM spy_ohlc_summary 
+      WHERE trade_date = CURRENT_DATE
+      LIMIT 1;
+    `);
+
+    if (!summary) {
+      return res.status(404).json({ error: "No OHLC summary found for today." });
+    }
+
+    // --- 2. Fetch rolling average ---
+    const [rollingAvg] = await fetchData(`
+      SELECT * FROM spy_ohlc_averages 
+      WHERE date = CURRENT_DATE
+      LIMIT 1;
+    `);
+
+    // --- 3. Calculate VWAP from today's intraday candles ---
+    const [vwapData] = await fetchData(`
+      SELECT 
+        SUM(((high + low + close) / 3) * volume)::float / NULLIF(SUM(volume), 0) AS vwap
+      FROM spy_ohlc
+      WHERE start_time::date = CURRENT_DATE;
+    `);
+
+    // --- 4. Analyze price structure (retests, consolidation zones, etc.) ---
+    const priceStructure = await analyzePriceStructure();
+
+    // --- 5. Compute % move from open to close ---
+    const openPrice = parseFloat(summary.open);
+    const closePrice = parseFloat(summary.close);
+    const percentFromOpen = ((closePrice - openPrice) / openPrice) * 100;
+
+    // --- 6. Respond with the full JSON summary ---
+    res.json({
+      date: summary.trade_date,
+      rolling_avg_18: {
+        avg_close: parseFloat(rollingAvg?.avg_close ?? 0),
+        latest_close: parseFloat(rollingAvg?.latest_close ?? 0)
+      },
+      ohlc_summary: {
+        open: openPrice,
+        high: parseFloat(summary.high),
+        low: parseFloat(summary.low),
+        close: closePrice,
+        total_volume: parseInt(summary.total_volume),
+        percent_from_open: parseFloat(percentFromOpen.toFixed(2))  // ✅ new metric
+      },
+      dealer_exposure: {
+        spot_price: parseFloat(summary.spot_price),
+        gamma_oi: parseFloat(summary.spot_gamma_oi),
+        charm_oi: parseFloat(summary.spot_charm_oi),
+        vanna_oi: parseFloat(summary.spot_vanna_oi),
+        implied_volatility: parseFloat(summary.implied_volatility)
+      },
+      vwap: parseFloat(vwapData?.vwap ?? 0),
+      price_structure: priceStructure
+    });
+
+  } catch (error) {
+    console.error("❌ Error generating intraday summary:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------
