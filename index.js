@@ -19,14 +19,22 @@ async function fetchWithRetry(url, retries = 3, delay = 5000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${API_KEY}` }
+        headers: { Authorization: `Bearer ${process.env.API_KEY}` },
+        timeout: 10000, // ⏱ 10-second max wait time
       });
       return response;
     } catch (error) {
-      if (error.response && error.response.status === 429 && attempt < retries) {
-        console.warn(`⚠️ API Rate Limit Exceeded (429). Retrying in ${delay / 1000} seconds... [Attempt ${attempt}/${retries}]`);
+      const isRateLimit = error.response?.status === 429;
+      const isRetryable =
+        isRateLimit ||
+        error.code === 'ECONNABORTED' ||
+        error.message.includes("socket hang up");
+
+      if (isRetryable && attempt < retries) {
+        console.warn(`⚠️ Retry ${attempt}/${retries} for ${url} due to: ${error.message}`);
         await new Promise(res => setTimeout(res, delay));
       } else {
+        console.error(`❌ Failed to fetch ${url}:`, error.message);
         throw error;
       }
     }
@@ -887,107 +895,245 @@ async function fetchAndStoreSpyOhlcAverages(client) {
   }
 }
 
+async function storeDailyOhlcSummary() {
+  const client = new Client({
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASS,
+    ssl: { rejectUnauthorized: false }
+  });
+
+  await client.connect();
+  const today = dayjs().format("YYYY-MM-DD");
+
+  // 1. Fetch Spot GEX
+  const gexResponse = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/spot-exposures");
+  const spot = gexResponse.data?.data?.sort((a, b) => new Date(b.time) - new Date(a.time))[0];
+
+  // 2. Fetch IV
+  const ivResponse = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/volatility/term-structure");
+  const iv = ivResponse.data?.data?.find(d => d.dte === 0);
+
+  // 3. Prepare values
+  const values = [
+    today,
+    parseFloat(spot?.price ?? 0),
+    parseFloat(spot?.gamma_per_one_percent_move_oi ?? 0),
+    parseFloat(spot?.charm_per_one_percent_move_oi ?? 0),
+    parseFloat(spot?.vanna_per_one_percent_move_oi ?? 0),
+    parseFloat(iv?.volatility ?? 0)
+  ];
+
+  // 4. Fixed summaryQuery using window + aggregate separation
+  const summaryQuery = `
+    WITH base AS (
+      SELECT *
+      FROM spy_ohlc
+      WHERE start_time::time BETWEEN '14:30:00' AND '21:00:00'
+        AND start_time::date = $1
+    ),
+    windowed AS (
+      SELECT 
+        DATE(start_time) AS trade_date,
+        FIRST_VALUE(open) OVER (PARTITION BY DATE(start_time) ORDER BY start_time ASC) AS open,
+        FIRST_VALUE(close) OVER (PARTITION BY DATE(start_time) ORDER BY start_time DESC) AS close,
+        high,
+        low,
+        volume
+      FROM base
+    ),
+    summary AS (
+      SELECT
+        trade_date,
+        MAX(high) AS high,
+        MIN(low) AS low,
+        MAX(open) AS open,
+        MAX(close) AS close,
+        SUM(volume) AS total_volume
+      FROM windowed
+      GROUP BY trade_date
+    )
+    INSERT INTO spy_ohlc_summary (
+      trade_date, open, high, low, close, total_volume,
+      spot_price, spot_gamma_oi, spot_charm_oi, spot_vanna_oi, implied_volatility,
+      updated_at
+    )
+    SELECT 
+      s.trade_date, s.open, s.high, s.low, s.close, s.total_volume,
+      $2, $3, $4, $5, $6,
+      now()
+    FROM summary s
+    ON CONFLICT (trade_date) DO UPDATE
+    SET open = EXCLUDED.open,
+        high = EXCLUDED.high,
+        low = EXCLUDED.low,
+        close = EXCLUDED.close,
+        total_volume = EXCLUDED.total_volume,
+        spot_price = EXCLUDED.spot_price,
+        spot_gamma_oi = EXCLUDED.spot_gamma_oi,
+        spot_charm_oi = EXCLUDED.spot_charm_oi,
+        spot_vanna_oi = EXCLUDED.spot_vanna_oi,
+        implied_volatility = EXCLUDED.implied_volatility,
+        updated_at = now();
+  `;
+
+  await client.query(summaryQuery, values);
+
+  // 5. Version snapshot (same structure)
+  const versionQuery = `
+    WITH base AS (
+      SELECT *
+      FROM spy_ohlc
+      WHERE start_time::time BETWEEN '14:30:00' AND '21:00:00'
+        AND start_time::date = $1
+    ),
+    windowed AS (
+      SELECT 
+        DATE(start_time) AS trade_date,
+        FIRST_VALUE(open) OVER (PARTITION BY DATE(start_time) ORDER BY start_time ASC) AS open,
+        FIRST_VALUE(close) OVER (PARTITION BY DATE(start_time) ORDER BY start_time DESC) AS close,
+        high,
+        low,
+        volume
+      FROM base
+    ),
+    summary AS (
+      SELECT
+        trade_date,
+        MAX(high) AS high,
+        MIN(low) AS low,
+        MAX(open) AS open,
+        MAX(close) AS close,
+        SUM(volume) AS total_volume
+      FROM windowed
+      GROUP BY trade_date
+    )
+    INSERT INTO spy_ohlc_summary_versions (
+      trade_date, open, high, low, close, total_volume,
+      spot_price, spot_gamma_oi, spot_charm_oi, spot_vanna_oi, implied_volatility
+    )
+    SELECT 
+      s.trade_date, s.open, s.high, s.low, s.close, s.total_volume,
+      $2, $3, $4, $5, $6
+    FROM summary s;
+  `;
+
+  await client.query(versionQuery, values);
+
+  await client.end();
+  console.log("✅ Daily OHLC summary updated + version snapshot stored.");
+}
+
 // -----------------------
 // Main function to fetch and store all SPY datasets
 // -----------------------
 async function main() {
-    console.log("🚀 Fetching all datasets...");
+  console.log("🚀 Fetching all datasets...");
 
-    try {
-        console.log("📢 Calling fetchSpyIV0DTE...");
-        const spyIV0DTE = await fetchSpyIV0DTE();
-        console.log("✅ SPY IV 0 DTE Data Fetched:", spyIV0DTE);
+  try {
+    console.log("📢 Calling fetchSpyIV0DTE...");
+    const spyIV0DTE = await fetchSpyIV0DTE();
+    console.log("✅ SPY IV 0 DTE Data Fetched:", spyIV0DTE);
 
-        // Fetch all datasets in parallel
-        const [
-            ohlcData,
-            spotGexData,
-            greeksByStrikeData,
-            optionPriceLevelsData,
-            marketTideData,
-            bidAskSpy,
-            bidAskSpx,
-            bidAskQqq,
-            bidAskNdx,
-            greekSpy,
-            greekSpx,
-        ] = await Promise.all([
-            fetchSpyOhlcData().catch(error => {
-                console.error("❌ OHLC Fetch Error:", error.message);
-                return [];
-            }),
-            fetchSpySpotGex().catch(error => {
-                console.error("❌ Spot GEX Fetch Error:", error.message);
-                return [];
-            }),
-            fetchSpyGreeksByStrike().catch(error => {
-                console.error("❌ Greeks Fetch Error:", error.message);
-                return [];
-            }),
-            fetchSpyOptionPriceLevels().catch(error => {
-                console.error("❌ Option Price Levels Fetch Error:", error.message);
-                return [];
-            }),
-            fetchMarketTideData().catch(error => {
-                console.error("❌ Market Tide Fetch Error:", error.message);
-                return [];
-            }),
-            fetchBidAskVolumeData("SPY").catch(error => {
-                console.error("❌ Bid/Ask SPY Fetch Error:", error.message);
-                return [];
-            }),
-            fetchBidAskVolumeData("SPX").catch(error => {
-                console.error("❌ Bid/Ask SPX Fetch Error:", error.message);
-                return [];
-            }),
-            fetchBidAskVolumeData("QQQ").catch(error => {
-                console.error("❌ Bid/Ask QQQ Fetch Error:", error.message);
-                return [];
-            }),
-            fetchBidAskVolumeData("NDX").catch(error => {
-                console.error("❌ Bid/Ask NDX Fetch Error:", error.message);
-                return [];
-            }),
-            fetchGreekExposure("SPY").catch(error => {
-                console.error("❌ Greek SPY Fetch Error:", error.message);
-                return [];
-            }),
-            fetchGreekExposure("SPX").catch(error => {
-                console.error("❌ Greek SPX Fetch Error:", error.message);
-                return [];
-            }),
-        ]);
+    // Fetch all datasets in parallel with error handling
+    const [
+      ohlcData,
+      spotGexData,
+      greeksByStrikeData,
+      optionPriceLevelsData,
+      marketTideData,
+      bidAskSpy,
+      bidAskSpx,
+      bidAskQqq,
+      bidAskNdx,
+      greekSpy,
+      greekSpx,
+    ] = await Promise.all([
+      fetchSpyOhlcData().catch(error => {
+        console.error("❌ OHLC Fetch Error:", error.message);
+        return [];
+      }),
+      fetchSpySpotGex().catch(error => {
+        console.error("❌ Spot GEX Fetch Error:", error.message);
+        return [];
+      }),
+      fetchSpyGreeksByStrike().catch(error => {
+        console.error("❌ Greeks Fetch Error:", error.message);
+        return [];
+      }),
+      fetchSpyOptionPriceLevels().catch(error => {
+        console.error("❌ Option Price Levels Fetch Error:", error.message);
+        return [];
+      }),
+      fetchMarketTideData().catch(error => {
+        console.error("❌ Market Tide Fetch Error:", error.message);
+        return [];
+      }),
+      fetchBidAskVolumeData("SPY").catch(error => {
+        console.error("❌ Bid/Ask SPY Fetch Error:", error.message);
+        return [];
+      }),
+      fetchBidAskVolumeData("SPX").catch(error => {
+        console.error("❌ Bid/Ask SPX Fetch Error:", error.message);
+        return [];
+      }),
+      fetchBidAskVolumeData("QQQ").catch(error => {
+        console.error("❌ Bid/Ask QQQ Fetch Error:", error.message);
+        return [];
+      }),
+      fetchBidAskVolumeData("NDX").catch(error => {
+        console.error("❌ Bid/Ask NDX Fetch Error:", error.message);
+        return [];
+      }),
+      fetchGreekExposure("SPY").catch(error => {
+        console.error("❌ Greek SPY Fetch Error:", error.message);
+        return [];
+      }),
+      fetchGreekExposure("SPX").catch(error => {
+        console.error("❌ Greek SPX Fetch Error:", error.message);
+        return [];
+      }),
+    ]);
 
-        // ✅ Debugging: Check if market tide & bid ask data exist
-        console.log("📌 Market Tide Data Before Storing:", marketTideData);
-        console.log("📌 Bid/Ask SPY Data Before Storing:", bidAskSpy);
+    // ✅ Debugging: Check if market tide & bid ask data exist
+    console.log("📌 Market Tide Data Before Storing:", marketTideData);
+    console.log("📌 Bid/Ask SPY Data Before Storing:", bidAskSpy);
 
-        // Store all datasets in parallel
-        await Promise.all([
-            ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
-            spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
-            optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
-            greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-            spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
-            greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
-            greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
+    // Store all datasets in parallel
+    await Promise.all([
+      ohlcData?.length > 0 ? storeSpyOhlcDataInDB(ohlcData) : null,
+      spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
+      optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
+      greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
+      spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
+      greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
+      greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
+      marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
+      bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
+      bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
+      bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
+      bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
+    ]);
 
-            // ✅ Added missing storage functions for Market Tide and Bid/Ask Volume
-            marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
-            bidAskSpy?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpy) : null,
-            bidAskSpx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskSpx) : null,
-            bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
-            bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
-        ]);
+    // ✅ EOD summary + snapshot
+    console.log("📦 Running daily OHLC summary + version snapshot...");
+    await storeDailyOhlcSummary();
 
-        console.log("✅ All data fetch and storage operations completed successfully.");
+    console.log("✅ All data fetch, storage, and summary operations completed successfully.");
 
-    } catch (error) {
-        console.error("❌ Error in main function:", error.message);
-    }
+  } catch (error) {
+    console.error("❌ Error in main function:", error.message);
+  }
+}
+
+// Helper delay function
+function pause(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ✅ Run main only if explicitly called
 if (require.main === module) {
-    main();
+  main();
 }

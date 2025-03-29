@@ -18,8 +18,44 @@ paths:
           content:
             application/json:
               schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    open:
+                      type: number
+                    high:
+                      type: number
+                    low:
+                      type: number
+                    close:
+                      type: number
+                    volume:
+                      type: integer
+                    total_volume:
+                      type: integer
+                    start_time:
+                      type: string
+                      format: date-time
+                    end_time:
+                      type: string
+                      format: date-time
+
+  /api/spy/ohlc-summary:
+    get:
+      summary: Get Daily SPY OHLC Summary (Latest)
+      operationId: getSpyOhlcSummary
+      responses:
+        '200':
+          description: Latest daily summary of SPY OHLC data with dealer exposure and volatility.
+          content:
+            application/json:
+              schema:
                 type: object
                 properties:
+                  trade_date:
+                    type: string
+                    format: date
                   open:
                     type: number
                   high:
@@ -30,14 +66,18 @@ paths:
                     type: number
                   total_volume:
                     type: integer
-                  volume:
-                    type: integer
-                  start_time:
-                    type: string
-                    format: date-time
-                  end_time:
-                    type: string
-                    format: date-time
+                  spot_price:
+                    type: number
+                  spot_gamma_oi:
+                    type: number
+                  spot_charm_oi:
+                    type: number
+                  spot_vanna_oi:
+                    type: number
+                  implied_volatility:
+                    type: number
+                  vwap:                        
+                    type: number
 
   /api/spy/spot-gex:
     get:
@@ -64,73 +104,73 @@ paths:
                     type: string
                     format: date-time
 
-/api/spy/iv/0dte:
-  get:
-    summary: Get SPY Implied Volatility (0 DTE)
-    operationId: getSPYIV0DTE
-    description: Fetch the latest SPY 0 DTE Implied Volatility data and the last 5 available records.
-    responses:
-      "200":
-        description: Successfully retrieved IV data for SPY (0 DTE).
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                latest:
-                  type: object
-                  properties:
-                    symbol:
-                      type: string
-                      example: "SPY"
-                    date:
-                      type: string
-                      format: date
-                      example: "2025-03-25"
-                    expiry:
-                      type: string
-                      format: date
-                      example: "2025-03-25"
-                    dte:
-                      type: integer
-                      example: 0
-                    implied_move:
-                      type: number
-                      example: 1.7000
-                    implied_move_perc:
-                      type: number
-                      example: 0.00295
-                    volatility:
-                      type: number
-                      example: 0.1751
-                    recorded_at:
-                      type: string
-                      format: date-time
-                      example: "2025-03-26T02:32:00.200Z"
-                last_5:
-                  type: array
-                  items:
+  /api/spy/iv/0dte:
+    get:
+      summary: Get SPY Implied Volatility (0 DTE)
+      operationId: getSPYIV0DTE
+      description: Fetch the latest SPY 0 DTE Implied Volatility data and the last 5 available records.
+      responses:
+        "200":
+          description: Successfully retrieved IV data for SPY (0 DTE).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  latest:
                     type: object
                     properties:
                       symbol:
                         type: string
+                        example: "SPY"
                       date:
                         type: string
                         format: date
+                        example: "2025-03-25"
                       expiry:
                         type: string
                         format: date
+                        example: "2025-03-25"
                       dte:
                         type: integer
+                        example: 0
                       implied_move:
                         type: number
+                        example: 1.7000
                       implied_move_perc:
                         type: number
+                        example: 0.00295
                       volatility:
                         type: number
+                        example: 0.1751
                       recorded_at:
                         type: string
                         format: date-time
+                        example: "2025-03-26T02:32:00.200Z"
+                  last_5:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        symbol:
+                          type: string
+                        date:
+                          type: string
+                          format: date
+                        expiry:
+                          type: string
+                          format: date
+                        dte:
+                          type: integer
+                        implied_move:
+                          type: number
+                        implied_move_perc:
+                          type: number
+                        volatility:
+                          type: number
+                        recorded_at:
+                          type: string
+                          format: date-time
 
   /api/spy/market-tide:
     get:
