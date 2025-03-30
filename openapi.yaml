@@ -79,6 +79,86 @@ paths:
                   vwap:                        
                     type: number
 
+  /api/spy/intraday-summary:
+    get:
+      summary: Get SPY Intraday Summary
+      description: Fetch SPY daily intraday summary including OHLC, VWAP, price structure, and dealer exposure. Supports optional ?date=YYYY-MM-DD.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Optional date to fetch intraday summary for (format YYYY-MM-DD). Defaults to today if not provided.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Successfully retrieved SPY intraday summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  rolling_avg_18:
+                    type: object
+                    properties:
+                      avg_close:
+                        type: number
+                      latest_close:
+                        type: number
+                  ohlc_summary:
+                    type: object
+                    properties:
+                      open:
+                        type: number
+                      high:
+                        type: number
+                      low:
+                        type: number
+                      close:
+                        type: number
+                      total_volume:
+                        type: integer
+                      percent_from_open:
+                        type: number
+                  dealer_exposure:
+                    type: object
+                    properties:
+                      spot_price:
+                        type: number
+                      gamma_oi:
+                        type: number
+                      charm_oi:
+                        type: number
+                      vanna_oi:
+                        type: number
+                      implied_volatility:
+                        type: number
+                  vwap:
+                    type: number
+                  price_structure:
+                    type: object
+                    properties:
+                      retested_levels:
+                        type: array
+                        items:
+                          type: number
+                      support_zones:
+                        type: array
+                        items:
+                          type: number
+                      resistance_zones:
+                        type: array
+                        items:
+                          type: number
+                      consolidation_zones:
+                        type: array
+                        items:
+                          type: object
+
   /api/spy/spot-gex:
     get:
       summary: Get SPY Spot GEX

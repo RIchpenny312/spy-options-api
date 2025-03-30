@@ -36,12 +36,26 @@ async function fetchData(query, params = []) {
 
 // 🔹 Fetch SPY OHLC Data (5m)
 app.get('/api/spy/ohlc', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
     const data = await fetchData(`
-        SELECT * FROM spy_ohlc 
-        ORDER BY start_time DESC 
-        LIMIT 10
-    `);
+      SELECT *
+      FROM spy_ohlc 
+      WHERE start_time::date = $1
+      ORDER BY start_time ASC
+    `, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY OHLC data found for ${date}` });
+    }
+
     res.json(data);
+
+  } catch (error) {
+    console.error(`❌ Error fetching SPY OHLC data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // 🔹 Fetch SPY Spot GEX (Latest)
@@ -273,41 +287,44 @@ app.get("/api/spy/iv/0dte", async (req, res) => {
 // ✅ Fetch SPY SPY Intraday Summary
 app.get('/api/spy/intraday-summary', async (req, res) => {
   try {
+    // --- 0. Determine the target date (from query or default to today) ---
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
     // --- 1. Fetch daily OHLC summary ---
     const [summary] = await fetchData(`
       SELECT * FROM spy_ohlc_summary 
-      WHERE trade_date = CURRENT_DATE
+      WHERE trade_date = $1
       LIMIT 1;
-    `);
+    `, [date]);
 
     if (!summary) {
-      return res.status(404).json({ error: "No OHLC summary found for today." });
+      return res.status(404).json({ error: `No OHLC summary found for ${date}` });
     }
 
     // --- 2. Fetch rolling average ---
     const [rollingAvg] = await fetchData(`
       SELECT * FROM spy_ohlc_averages 
-      WHERE date = CURRENT_DATE
+      WHERE date = $1
       LIMIT 1;
-    `);
+    `, [date]);
 
-    // --- 3. Calculate VWAP from today's intraday candles ---
+    // --- 3. Calculate VWAP from intraday candles ---
     const [vwapData] = await fetchData(`
       SELECT 
         SUM(((high + low + close) / 3) * volume)::float / NULLIF(SUM(volume), 0) AS vwap
       FROM spy_ohlc
-      WHERE start_time::date = CURRENT_DATE;
-    `);
+      WHERE start_time::date = $1;
+    `, [date]);
 
-    // --- 4. Analyze price structure (retests, consolidation zones, etc.) ---
-    const priceStructure = await analyzePriceStructure();
+    // --- 4. Analyze price structure (pass date into function) ---
+    const priceStructure = await analyzePriceStructure(date);
 
     // --- 5. Compute % move from open to close ---
     const openPrice = parseFloat(summary.open);
     const closePrice = parseFloat(summary.close);
     const percentFromOpen = ((closePrice - openPrice) / openPrice) * 100;
 
-    // --- 6. Respond with the full JSON summary ---
+    // --- 6. Return structured JSON response ---
     res.json({
       date: summary.trade_date,
       rolling_avg_18: {
@@ -385,6 +402,40 @@ app.get('/api/bid-shift-signals', async (req, res) => {
 
   res.json(data);
 });
+
+// ✅ Analyze SPY intraday price structure
+async function analyzePriceStructure(date = null) {
+  const targetDate = date || new Date().toISOString().split("T")[0];
+
+  const candles = await fetchData(`
+    SELECT close FROM spy_ohlc
+    WHERE start_time::date = $1
+    ORDER BY start_time ASC
+  `, [targetDate]);
+
+  const closes = candles.map(c => parseFloat(c.close));
+  const levels = {};
+
+  closes.forEach(price => {
+    const rounded = price.toFixed(2);
+    levels[rounded] = (levels[rounded] || 0) + 1;
+  });
+
+  const keyLevels = Object.entries(levels)
+    .filter(([_, count]) => count >= 3)
+    .map(([price]) => parseFloat(price));
+
+  const lastPrice = closes[closes.length - 1];
+  const support = keyLevels.filter(p => p < lastPrice).slice(-3);
+  const resistance = keyLevels.filter(p => p > lastPrice).slice(0, 3);
+
+  return {
+    retested_levels: keyLevels,
+    support_zones: support,
+    resistance_zones: resistance,
+    consolidation_zones: [] // Add clustering logic later
+  };
+}
 
 // ------------------------
 // ✅ Start Server
