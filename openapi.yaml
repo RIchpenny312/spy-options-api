@@ -387,6 +387,68 @@ paths:
                       type: string
                       format: date
 
+  /api/spy/bid-ask-volume-enhanced:
+    get:
+      summary: Get Enhanced Bid/Ask Volume Data
+      operationId: getEnhancedBidAskVolume
+      description: Returns SPY, SPX, QQQ, and NDX bid/ask volume breakdown including delta, spoof flags, sentiment, and confidence level.
+      responses:
+        "200":
+          description: Successfully retrieved enhanced bid/ask volume data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    symbol:
+                      type: string
+                    date:
+                      type: string
+                      format: date
+                    call_volume:
+                      type: integer
+                    put_volume:
+                      type: integer
+                    call_volume_bid_side:
+                      type: integer
+                    call_volume_ask_side:
+                      type: integer
+                    put_volume_bid_side:
+                      type: integer
+                    put_volume_ask_side:
+                      type: integer
+                    volume_delta_call:
+                      type: integer
+                    volume_delta_put:
+                      type: integer
+                    call_put_ratio_bid:
+                      type: number
+                      format: float
+                    spoof_flag_call:
+                      type: boolean
+                    spoof_flag_put:
+                      type: boolean
+                    price_open:
+                      type: number
+                    price_close:
+                      type: number
+                    price_change:
+                      type: number
+                    price_direction:
+                      type: string
+                      enum: [up, down, flat]
+                    sentiment:
+                      type: string
+                      enum: [Bullish, Bearish, Neutral]
+                    confidence_level:
+                      type: string
+                      enum: [High, Moderate, Low]
+                    recorded_at:
+                      type: string
+                      format: date-time
+
   /api/greek-exposure:
     get:
       summary: Fetch the last 5 Greek Exposure records for SPY or SPX

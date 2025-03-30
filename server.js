@@ -162,6 +162,32 @@ app.get('/api/spy/bid-ask-volume', async (req, res) => {
     }
 });
 
+// 🔹 Fetch Enhanced Bid/Ask Volume Data (Limited to 5)
+app.get('/api/spy/bid-ask-volume-enhanced', async (req, res) => {
+    try {
+        const data = await fetchData(`
+            SELECT 
+                symbol, date,
+                call_volume, put_volume,
+                call_volume_bid_side, call_volume_ask_side,
+                put_volume_bid_side, put_volume_ask_side,
+                volume_delta_call, volume_delta_put,
+                call_put_ratio_bid,
+                spoof_flag_call, spoof_flag_put,
+                price_open, price_close, price_change, price_direction,
+                sentiment, confidence_level,
+                recorded_at
+            FROM bid_ask_volume_enhanced
+            ORDER BY date DESC
+            LIMIT 5
+        `);
+        res.json(data);
+    } catch (error) {
+        console.error("❌ Error fetching Enhanced Bid/Ask Volume:", error.message);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 // 🔹 Fetch SPY Option Price Levels
 app.get('/api/spy/option-price-levels/today', async (req, res) => {
     const data = await fetchData(`

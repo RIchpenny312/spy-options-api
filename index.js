@@ -903,6 +903,146 @@ async function storeGreekExposureInDB(data) {
 }
 
 // -----------------------
+// Fetch and Store Functions
+// -----------------------
+
+// ✅ Fetch and Store Enhanced Bid Ask Volume
+async function fetchAndStoreEnhancedBidAsk(ticker, price_open, price_close) {
+  try {
+    console.log(`🔍 Fetching BID/ASK volume for ${ticker}...`);
+    const response = await fetchWithRetry(`https://api.unusualwhales.com/api/stock/${ticker}/options-volume`);
+
+    const raw = response?.data?.data?.[0];
+    if (!raw) {
+      console.warn(`⚠️ No volume data returned for ${ticker}`);
+      return;
+    }
+
+    const bidCall = raw.call_volume_bid_side || 0;
+    const askCall = raw.call_volume_ask_side || 0;
+    const bidPut = raw.put_volume_bid_side || 0;
+    const askPut = raw.put_volume_ask_side || 0;
+
+    const volumeDeltaCall = bidCall - askCall;
+    const volumeDeltaPut = bidPut - askPut;
+    const callPutRatio = bidPut > 0 ? bidCall / bidPut : null;
+
+    const priceChange = price_close - price_open;
+    const priceDir = priceChange > 0 ? "up" : priceChange < 0 ? "down" : "flat";
+
+    const spoofFlagCall = askCall > bidCall && priceDir === "up";
+    const spoofFlagPut = bidPut > askPut && priceDir === "down";
+
+    // Sentiment Logic
+    let sentiment = "Neutral";
+    if (bidPut > bidCall && volumeDeltaPut > 0) sentiment = "Bullish";
+    else if (bidCall > bidPut && volumeDeltaCall > 0) sentiment = "Bearish";
+
+    // Confidence logic — basic, to be upgraded if mult-ticker available
+    let confidence = (Math.abs(volumeDeltaCall) > 100000 || Math.abs(volumeDeltaPut) > 100000) ? "High" : "Moderate";
+
+    const data = {
+      symbol: ticker,
+      date: dayjs().format("YYYY-MM-DD"),
+      recorded_at: new Date(),
+
+      call_volume: raw.call_volume,
+      put_volume: raw.put_volume,
+      call_volume_bid_side: bidCall,
+      call_volume_ask_side: askCall,
+      put_volume_bid_side: bidPut,
+      put_volume_ask_side: askPut,
+
+      volume_delta_call: volumeDeltaCall,
+      volume_delta_put: volumeDeltaPut,
+      call_put_ratio_bid: callPutRatio,
+
+      spoof_flag_call: spoofFlagCall,
+      spoof_flag_put: spoofFlagPut,
+
+      price_open,
+      price_close,
+      price_change: priceChange,
+      price_direction: priceDir,
+
+      sentiment,
+      confidence_level: confidence
+    };
+
+    await insertEnhancedBidAskIntoDB(data);
+  } catch (err) {
+    console.error(`❌ Error processing bid/ask volume for ${ticker}:`, err.message);
+  }
+}
+
+// ✅ Compute Bid Ask Volume
+async function insertEnhancedBidAskIntoDB(data) {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  try {
+    await client.query(`
+      INSERT INTO bid_ask_volume_enhanced (
+        symbol, date, recorded_at,
+        call_volume, put_volume,
+        call_volume_bid_side, call_volume_ask_side,
+        put_volume_bid_side, put_volume_ask_side,
+        volume_delta_call, volume_delta_put,
+        call_put_ratio_bid,
+        spoof_flag_call, spoof_flag_put,
+        price_open, price_close, price_change, price_direction,
+        sentiment, confidence_level
+      ) VALUES (
+        $1, $2, $3,
+        $4, $5,
+        $6, $7,
+        $8, $9,
+        $10, $11,
+        $12,
+        $13, $14,
+        $15, $16, $17, $18,
+        $19, $20
+      )
+      ON CONFLICT (symbol, date) DO UPDATE SET
+        call_volume = EXCLUDED.call_volume,
+        put_volume = EXCLUDED.put_volume,
+        call_volume_bid_side = EXCLUDED.call_volume_bid_side,
+        call_volume_ask_side = EXCLUDED.call_volume_ask_side,
+        put_volume_bid_side = EXCLUDED.put_volume_bid_side,
+        put_volume_ask_side = EXCLUDED.put_volume_ask_side,
+        volume_delta_call = EXCLUDED.volume_delta_call,
+        volume_delta_put = EXCLUDED.volume_delta_put,
+        call_put_ratio_bid = EXCLUDED.call_put_ratio_bid,
+        spoof_flag_call = EXCLUDED.spoof_flag_call,
+        spoof_flag_put = EXCLUDED.spoof_flag_put,
+        price_open = EXCLUDED.price_open,
+        price_close = EXCLUDED.price_close,
+        price_change = EXCLUDED.price_change,
+        price_direction = EXCLUDED.price_direction,
+        sentiment = EXCLUDED.sentiment,
+        confidence_level = EXCLUDED.confidence_level,
+        recorded_at = NOW();
+    `, [
+      data.symbol, data.date, data.recorded_at,
+      data.call_volume, data.put_volume,
+      data.call_volume_bid_side, data.call_volume_ask_side,
+      data.put_volume_bid_side, data.put_volume_ask_side,
+      data.volume_delta_call, data.volume_delta_put,
+      data.call_put_ratio_bid,
+      data.spoof_flag_call, data.spoof_flag_put,
+      data.price_open, data.price_close, data.price_change, data.price_direction,
+      data.sentiment, data.confidence_level
+    ]);
+
+    console.log(`✅ Stored enhanced BID/ASK volume for ${data.symbol}`);
+  } catch (err) {
+    console.error("❌ DB Insert Error:", err.message);
+  } finally {
+    await client.end();
+  }
+}
+
+// -----------------------
 // Compute and Store Functions
 // -----------------------
 
@@ -1197,6 +1337,21 @@ async function main() {
       bidAskQqq?.length > 0 ? storeBidAskVolumeDataInDB(bidAskQqq) : null,
       bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
     ]);
+
+    // ✅ New: Compute Delta Trends for Today
+    const spyPriceOpen = 523.12;  // Replace with OHLC open
+    const spyPriceClose = 525.65; // Replace with OHLC close
+    const spxPriceOpen = 5263.44;
+    const spxPriceClose = 5280.01;
+    const qqqPriceOpen = 438.20;
+    const qqqPriceClose = 440.70;
+    const ndxPriceOpen = 18350.00;
+    const ndxPriceClose = 18560.00;
+
+    await fetchAndStoreEnhancedBidAsk("SPY", spyPriceOpen, spyPriceClose);
+    await fetchAndStoreEnhancedBidAsk("SPX", spxPriceOpen, spxPriceClose);
+    await fetchAndStoreEnhancedBidAsk("QQQ", qqqPriceOpen, qqqPriceClose);
+    await fetchAndStoreEnhancedBidAsk("NDX", ndxPriceOpen, ndxPriceClose);
 
     // ✅ New: Compute Delta Trends for Today
     const todayMarketTideData = await fetchTodayMarketTideDataFromDB();
