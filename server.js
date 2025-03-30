@@ -339,6 +339,53 @@ app.get('/api/spy/intraday-summary', async (req, res) => {
   }
 });
 
+// 🔹 Get latest shift signal for each symbol
+app.get('/api/bid-shift-signals/latest', async (req, res) => {
+  const data = await fetchData(`
+    SELECT DISTINCT ON (symbol) * 
+    FROM bid_shift_signals
+    ORDER BY symbol, recorded_at DESC
+  `);
+  res.json(data);
+});
+
+// 🔹 Get all continuation signals for today
+app.get('/api/bid-shift-signals/continuations', async (req, res) => {
+  const data = await fetchData(`
+    SELECT * FROM bid_shift_signals
+    WHERE continuation = TRUE
+    AND recorded_at::date = CURRENT_DATE
+    ORDER BY recorded_at DESC
+  `);
+  res.json(data);
+});
+
+// 🔹 Filter shift signals by symbol and confidence
+app.get('/api/bid-shift-signals', async (req, res) => {
+  const { symbol, confidence } = req.query;
+  const params = [];
+  let whereClause = "WHERE 1=1";
+
+  if (symbol) {
+    params.push(symbol.toUpperCase());
+    whereClause += ` AND symbol = $${params.length}`;
+  }
+
+  if (confidence) {
+    params.push(confidence);
+    whereClause += ` AND confidence = $${params.length}`;
+  }
+
+  const data = await fetchData(`
+    SELECT * FROM bid_shift_signals
+    ${whereClause}
+    ORDER BY recorded_at DESC
+    LIMIT 25
+  `, params);
+
+  res.json(data);
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------

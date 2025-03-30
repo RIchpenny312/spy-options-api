@@ -495,3 +495,88 @@ paths:
                     recorded_at:
                       type: string
                       format: date-time
+
+  /api/bid-shift-signals/latest:
+    get:
+      summary: Get the latest bid-side shift signal for each symbol
+      operationId: getLatestBidShiftSignals
+      responses:
+        "200":
+          description: Latest shift signals grouped by symbol
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BidShiftSignal'
+
+  /api/bid-shift-signals/continuations:
+    get:
+      summary: Get all continuation signals for today
+      operationId: getBidShiftContinuations
+      responses:
+        "200":
+          description: All continuation signals recorded today
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BidShiftSignal'
+
+  /api/bid-shift-signals:
+    get:
+      summary: Filter bid shift signals by symbol and confidence
+      operationId: getFilteredBidShiftSignals
+      parameters:
+        - name: symbol
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional symbol filter (e.g., SPY, SPX, QQQ)
+        - name: confidence
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [Low, Moderate, High]
+          description: Optional confidence level filter
+      responses:
+        "200":
+          description: Filtered list of bid shift signals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BidShiftSignal'
+
+components:
+  schemas:
+    BidShiftSignal:
+      type: object
+      properties:
+        symbol:
+          type: string
+        recorded_at:
+          type: string
+          format: date-time
+        dominant_side:
+          type: string
+          enum: [CALL, PUT]
+        previous_dominant_side:
+          type: string
+        shift_type:
+          type: string
+          enum: [PUT_TO_CALL, CALL_TO_PUT, NONE]
+        continuation:
+          type: boolean
+        delta_confirmation:
+          type: boolean
+        confidence:
+          type: string
+          enum: [Low, Moderate, High]
+        created_at:
+          type: string
+          format: date-time

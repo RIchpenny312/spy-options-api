@@ -786,6 +786,70 @@ async function storeBidAskVolumeDataInDB(data) {
   }
 }
 
+// Function to store BID Shift Signals
+async function storeBidShiftSignals(bidAskData) {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  try {
+    for (const current of bidAskData) {
+      const { ticker, call_volume_bid_side, put_volume_bid_side, volume_delta_call, volume_delta_put } = current;
+      const symbol = ticker.toUpperCase();
+      const recorded_at = new Date(); // or use current.date if needed
+
+      // Step 1: Determine current dominant side
+      const dominant_side = put_volume_bid_side > call_volume_bid_side ? 'PUT' : 'CALL';
+
+      // Step 2: Get previous dominant_side from DB
+      const prevQuery = await client.query(
+        `SELECT dominant_side FROM bid_shift_signals WHERE symbol = $1 ORDER BY recorded_at DESC LIMIT 1`,
+        [symbol]
+      );
+
+      const previous_dominant_side = prevQuery.rows.length ? prevQuery.rows[0].dominant_side : null;
+
+      // Step 3: Detect shift
+      let shift_type = 'NONE';
+      if (previous_dominant_side && dominant_side !== previous_dominant_side) {
+        shift_type = `${previous_dominant_side}_TO_${dominant_side}`;
+      }
+
+      // Step 4: Flag continuation
+      const continuation = previous_dominant_side === dominant_side;
+
+      // Step 5: Confirm delta
+      let delta_confirmation = false;
+      if (
+        (dominant_side === 'PUT' && volume_delta_put > 0) ||
+        (dominant_side === 'CALL' && volume_delta_call > 0)
+      ) {
+        delta_confirmation = true;
+      }
+
+      // Step 6: Assign confidence
+      let confidence = 'Low';
+      if (shift_type !== 'NONE' && delta_confirmation) confidence = 'High';
+      else if (continuation && delta_confirmation) confidence = 'Moderate';
+
+      // Step 7: Insert into DB
+      await client.query(
+        `INSERT INTO bid_shift_signals (
+          symbol, recorded_at, dominant_side, previous_dominant_side, shift_type, continuation, delta_confirmation, confidence
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8
+        )`,
+        [symbol, recorded_at, dominant_side, previous_dominant_side, shift_type, continuation, delta_confirmation, confidence]
+      );
+
+      console.log(`✅ Shift Signal Inserted for ${symbol}: ${shift_type} | Continuation: ${continuation} | Confidence: ${confidence}`);
+    }
+  } catch (error) {
+    console.error("❌ Error inserting bid shift signals:", error.message);
+  } finally {
+    await client.end();
+  }
+}
+
 // ✅ Function to store SPY IV Data (0 DTE) in DB
 async function storeSpyIV0DTEDataInDB(data) {
     if (!data.length) {
@@ -1338,7 +1402,12 @@ async function main() {
       bidAskNdx?.length > 0 ? storeBidAskVolumeDataInDB(bidAskNdx) : null
     ]);
 
-    // ✅ New: Compute Delta Trends for Today
+    // ✅ NEW: Compute and store bid-side shift signals
+    if (bidAskSpy?.length > 0) {
+      await storeBidShiftSignals(bidAskSpy);
+    }
+
+    // Compute Delta Trends for Today
     const spyPriceOpen = 523.12;  // Replace with OHLC open
     const spyPriceClose = 525.65; // Replace with OHLC close
     const spxPriceOpen = 5263.44;
@@ -1353,7 +1422,7 @@ async function main() {
     await fetchAndStoreEnhancedBidAsk("QQQ", qqqPriceOpen, qqqPriceClose);
     await fetchAndStoreEnhancedBidAsk("NDX", ndxPriceOpen, ndxPriceClose);
 
-    // ✅ New: Compute Delta Trends for Today
+    // ✅ Compute Delta Trends for Today
     const todayMarketTideData = await fetchTodayMarketTideDataFromDB();
     if (todayMarketTideData.length > 1) {
       const deltas = computeMarketTideDeltas(todayMarketTideData);
