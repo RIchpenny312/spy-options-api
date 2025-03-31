@@ -58,6 +58,19 @@ app.get('/api/spy/ohlc', async (req, res) => {
   }
 });
 
+// 🔹 SPY OHLC Daily 
+app.get('/api/spy/ohlc/daily', async (req, res) => {
+  const date = req.query.date;
+  const data = await fetchData(`
+    SELECT * FROM spy_ohlc
+    WHERE start_time::date = $1
+      AND start_time::time BETWEEN '14:30:00' AND '21:00:00'
+    ORDER BY start_time;
+  `, [date]);
+
+  res.json(data);
+});
+
 // 🔹 Fetch SPY Spot GEX (Latest)
 app.get('/api/spy/spot-gex', async (req, res) => {
     const data = await fetchData(`

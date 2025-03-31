@@ -41,6 +41,48 @@ paths:
                       type: string
                       format: date-time
 
+  /api/spy/ohlc/daily:
+    get:
+      summary: Get full SPY OHLC intraday data
+      operationId: getSPYOHLCFullDay
+      description: Returns all 5-minute candles for the specified trading day.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD).
+      responses:
+        "200":
+          description: Successfully retrieved full-day OHLC data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    open:
+                      type: number
+                    high:
+                      type: number
+                    low:
+                      type: number
+                    close:
+                      type: number
+                    volume:
+                      type: integer
+                    total_volume:
+                      type: integer
+                    start_time:
+                      type: string
+                      format: date-time
+                    end_time:
+                      type: string
+                      format: date-time
+
   /api/spy/ohlc-summary:
     get:
       summary: Get Daily SPY OHLC Summary (Latest)
