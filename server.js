@@ -301,74 +301,64 @@ app.get("/api/spy/iv/0dte", async (req, res) => {
     }
 });
 
-// ✅ Fetch SPY SPY Intraday Summary
+// ✅ Fetch SPY Intraday Summary
 app.get('/api/spy/intraday-summary', async (req, res) => {
+  const date = req.query.date || new Date().toISOString().split("T")[0];
+
   try {
-    // --- 0. Determine the target date (from query or default to today) ---
-    const date = req.query.date || new Date().toISOString().split("T")[0];
+    const [
+      rollingAvg18,
+      ohlcSummary,
+      dealerExposure,
+      vwapResult,
+      priceStructure,
+      marketTideLast3,
+      marketTideRollingAvg,
+      marketTideDeltasToday
+    ] = await Promise.all([
+      fetchData(`SELECT * FROM spy_rolling_avg_18 WHERE date = $1 LIMIT 1`, [date]),
+      fetchData(`SELECT * FROM spy_ohlc_summary WHERE trade_date = $1 LIMIT 1`, [date]),
+      fetchData(`SELECT * FROM dealer_exposure WHERE date = $1 LIMIT 1`, [date]),
+      fetchData(`SELECT vwap FROM spy_vwap WHERE date = $1 LIMIT 1`, [date]),
+      fetchData(`SELECT * FROM spy_price_structure WHERE date = $1 LIMIT 1`, [date]),
+      fetchData(`
+        SELECT timestamp, net_call_premium, net_put_premium, net_volume
+        FROM market_tide_data
+        WHERE date = $1
+        ORDER BY timestamp DESC
+        LIMIT 3
+      `, [date]),
+      fetchData(`
+        SELECT *
+        FROM market_tide_rolling_avg
+        WHERE date = $1
+        ORDER BY timestamp DESC
+        LIMIT 1
+      `, [date]),
+      fetchData(`
+        SELECT timestamp, delta_call, delta_put, delta_volume, sentiment
+        FROM market_tide_deltas
+        WHERE timestamp::date = $1
+        ORDER BY timestamp ASC
+      `, [date])
+    ]);
 
-    // --- 1. Fetch daily OHLC summary ---
-    const [summary] = await fetchData(`
-      SELECT * FROM spy_ohlc_summary 
-      WHERE trade_date = $1
-      LIMIT 1;
-    `, [date]);
-
-    if (!summary) {
-      return res.status(404).json({ error: `No OHLC summary found for ${date}` });
-    }
-
-    // --- 2. Fetch rolling average ---
-    const [rollingAvg] = await fetchData(`
-      SELECT * FROM spy_ohlc_averages 
-      WHERE date = $1
-      LIMIT 1;
-    `, [date]);
-
-    // --- 3. Calculate VWAP from intraday candles ---
-    const [vwapData] = await fetchData(`
-      SELECT 
-        SUM(((high + low + close) / 3) * volume)::float / NULLIF(SUM(volume), 0) AS vwap
-      FROM spy_ohlc
-      WHERE start_time::date = $1;
-    `, [date]);
-
-    // --- 4. Analyze price structure (pass date into function) ---
-    const priceStructure = await analyzePriceStructure(date);
-
-    // --- 5. Compute % move from open to close ---
-    const openPrice = parseFloat(summary.open);
-    const closePrice = parseFloat(summary.close);
-    const percentFromOpen = ((closePrice - openPrice) / openPrice) * 100;
-
-    // --- 6. Return structured JSON response ---
     res.json({
-      date: summary.trade_date,
-      rolling_avg_18: {
-        avg_close: parseFloat(rollingAvg?.avg_close ?? 0),
-        latest_close: parseFloat(rollingAvg?.latest_close ?? 0)
+      date,
+      rolling_avg_18: rollingAvg18[0] || {},
+      ohlc_summary: ohlcSummary[0] || {},
+      dealer_exposure: dealerExposure[0] || {},
+      vwap: vwapResult[0]?.vwap || null,
+      price_structure: priceStructure[0] || {},
+      market_tide: {
+        last_3: marketTideLast3.reverse(), // show in ascending time
+        rolling_avg: marketTideRollingAvg[0] || {}
       },
-      ohlc_summary: {
-        open: openPrice,
-        high: parseFloat(summary.high),
-        low: parseFloat(summary.low),
-        close: closePrice,
-        total_volume: parseInt(summary.total_volume),
-        percent_from_open: parseFloat(percentFromOpen.toFixed(2))  // ✅ new metric
-      },
-      dealer_exposure: {
-        spot_price: parseFloat(summary.spot_price),
-        gamma_oi: parseFloat(summary.spot_gamma_oi),
-        charm_oi: parseFloat(summary.spot_charm_oi),
-        vanna_oi: parseFloat(summary.spot_vanna_oi),
-        implied_volatility: parseFloat(summary.implied_volatility)
-      },
-      vwap: parseFloat(vwapData?.vwap ?? 0),
-      price_structure: priceStructure
+      market_tide_deltas: marketTideDeltasToday || []
     });
 
   } catch (error) {
-    console.error("❌ Error generating intraday summary:", error.message);
+    console.error("❌ Error building intraday summary:", error.message);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });

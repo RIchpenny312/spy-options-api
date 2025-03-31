@@ -83,48 +83,10 @@ paths:
                       type: string
                       format: date-time
 
-  /api/spy/ohlc-summary:
-    get:
-      summary: Get Daily SPY OHLC Summary (Latest)
-      operationId: getSpyOhlcSummary
-      responses:
-        '200':
-          description: Latest daily summary of SPY OHLC data with dealer exposure and volatility.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  trade_date:
-                    type: string
-                    format: date
-                  open:
-                    type: number
-                  high:
-                    type: number
-                  low:
-                    type: number
-                  close:
-                    type: number
-                  total_volume:
-                    type: integer
-                  spot_price:
-                    type: number
-                  spot_gamma_oi:
-                    type: number
-                  spot_charm_oi:
-                    type: number
-                  spot_vanna_oi:
-                    type: number
-                  implied_volatility:
-                    type: number
-                  vwap:                        
-                    type: number
-
   /api/spy/intraday-summary:
     get:
       summary: Get SPY Intraday Summary
-      description: Fetch SPY daily intraday summary including OHLC, VWAP, price structure, and dealer exposure. Supports optional ?date=YYYY-MM-DD.
+      description: Fetch SPY daily intraday summary including OHLC, VWAP, price structure, dealer exposure, market tide, and delta trends.
       parameters:
         - name: date
           in: query
@@ -200,6 +162,64 @@ paths:
                         type: array
                         items:
                           type: object
+                          properties:
+                            range:
+                              type: array
+                              items:
+                                type: number
+                            duration:
+                              type: string
+                  market_tide:
+                    type: object
+                    properties:
+                      last_3:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            timestamp:
+                              type: string
+                              format: date-time
+                            net_call_premium:
+                              type: number
+                            net_put_premium:
+                              type: number
+                            net_volume:
+                              type: integer
+                      rolling_avg:
+                        type: object
+                        properties:
+                          avg_net_call_premium_12_intervals:
+                            type: number
+                          avg_net_put_premium_12_intervals:
+                            type: number
+                          avg_net_volume_12_intervals:
+                            type: number
+                          avg_net_call_premium_48_intervals:
+                            type: number
+                          avg_net_put_premium_48_intervals:
+                            type: number
+                          avg_net_volume_48_intervals:
+                            type: number
+                          recorded_at:
+                            type: string
+                            format: date-time
+                  market_tide_deltas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        delta_call:
+                          type: number
+                        delta_put:
+                          type: number
+                        delta_volume:
+                          type: integer
+                        sentiment:
+                          type: string
 
   /api/spy/spot-gex:
     get:
