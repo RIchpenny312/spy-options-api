@@ -2,6 +2,7 @@ require("dotenv").config();
 const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
+const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
 
 // ✅ Load environment variables
 const API_KEY = process.env.API_KEY;
@@ -1318,6 +1319,9 @@ async function main() {
   console.log("🚀 Fetching all datasets...");
 
   try {
+    const today = new Date().toISOString().split("T")[0];
+    await ensureSpyPartitionForDate(today);
+    console.log(`✅ Ensured partition exists for ${today}`);	
     console.log("📢 Calling fetchSpyIV0DTE...");
     const spyIV0DTE = await fetchSpyIV0DTE();
     console.log("✅ SPY IV 0 DTE Data Fetched:", spyIV0DTE);

@@ -4,6 +4,7 @@ const { Client } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
 
 // ✅ PostgreSQL Connection Config
 const DB_CONFIG = {
@@ -38,6 +39,9 @@ async function fetchData(query, params = []) {
 app.get('/api/spy/ohlc', async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    // ✅ Ensure partition exists before querying
+    await ensureSpyPartitionForDate(date);
 
     const data = await fetchData(`
       SELECT *
