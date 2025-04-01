@@ -3,6 +3,7 @@ const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
 const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
+const { getMarketTideSnapshot } = require('./server'); // ✅ At the top of your file
 
 // ✅ Load environment variables
 const API_KEY = process.env.API_KEY;
@@ -1312,6 +1313,77 @@ function computeMarketTideDeltas(data) {
   });
 }
 
+// ✅ MARKET TIDE SNAPSHOT STORAGE
+async function storeMarketTideSnapshotInDB() {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  try {
+    console.log("📡 Fetching snapshot payload...");
+    const { latest_tide, rolling_avg, latest_delta } = await getMarketTideSnapshot();
+
+    if (!latest_tide || !rolling_avg || !latest_delta) {
+      console.warn("⚠️ Skipping snapshot — incomplete data");
+      console.log("🧭 Snapshot inputs:", { latest_tide, rolling_avg, latest_delta });
+      return;
+    }
+
+    const snapshot = {
+      timestamp: latest_tide.timestamp,
+      net_call_premium: latest_tide.net_call_premium,
+      net_put_premium: latest_tide.net_put_premium,
+      net_volume: latest_tide.net_volume,
+      delta_call: latest_delta.delta_call,
+      delta_put: latest_delta.delta_put,
+      delta_volume: latest_delta.delta_volume,
+      sentiment: latest_delta.sentiment,
+      avg_net_call_premium_12: rolling_avg.avg_net_call_premium_12_intervals,
+      avg_net_put_premium_12: rolling_avg.avg_net_put_premium_12_intervals,
+      avg_net_volume_12: rolling_avg.avg_net_volume_12_intervals,
+      avg_net_call_premium_48: rolling_avg.avg_net_call_premium_48_intervals,
+      avg_net_put_premium_48: rolling_avg.avg_net_put_premium_48_intervals,
+      avg_net_volume_48: rolling_avg.avg_net_volume_48_intervals
+    };
+
+    console.log("🧪 Snapshot about to insert:", snapshot);
+
+    await client.query(`
+      INSERT INTO market_tide_snapshot (
+        timestamp,
+        net_call_premium, net_put_premium, net_volume,
+        delta_call, delta_put, delta_volume, sentiment,
+        avg_net_call_premium_12, avg_net_put_premium_12, avg_net_volume_12,
+        avg_net_call_premium_48, avg_net_put_premium_48, avg_net_volume_48
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14
+      )
+      ON CONFLICT (timestamp) DO UPDATE SET
+        net_call_premium = EXCLUDED.net_call_premium,
+        net_put_premium = EXCLUDED.net_put_premium,
+        net_volume = EXCLUDED.net_volume,
+        delta_call = EXCLUDED.delta_call,
+        delta_put = EXCLUDED.delta_put,
+        delta_volume = EXCLUDED.delta_volume,
+        sentiment = EXCLUDED.sentiment,
+        avg_net_call_premium_12 = EXCLUDED.avg_net_call_premium_12,
+        avg_net_put_premium_12 = EXCLUDED.avg_net_put_premium_12,
+        avg_net_volume_12 = EXCLUDED.avg_net_volume_12,
+        avg_net_call_premium_48 = EXCLUDED.avg_net_call_premium_48,
+        avg_net_put_premium_48 = EXCLUDED.avg_net_put_premium_48,
+        avg_net_volume_48 = EXCLUDED.avg_net_volume_48,
+        recorded_at = NOW();
+    `, Object.values(snapshot));
+
+    console.log("✅ Market Tide Snapshot inserted.");
+  } catch (error) {
+    console.error("❌ Error storing Market Tide Snapshot:", error.message);
+    console.error("📛 Full error stack:", error.stack);
+  } finally {
+    await client.end();
+  }
+}
+
 // -----------------------
 // Main function to fetch and store all SPY datasets
 // -----------------------
@@ -1437,10 +1509,14 @@ async function main() {
     console.log("📦 Running daily OHLC summary + version snapshot...");
     await storeDailyOhlcSummary();
 
+    // ✅ Run Market Tide Consolidated Snapshot (Net + Delta + Avg)
+    await storeMarketTideSnapshotInDB();
+
     console.log("✅ All data fetch, storage, and summary operations completed successfully.");
 
   } catch (error) {
     console.error("❌ Error in main function:", error.message);
+    console.error("📛 Full error stack:", error.stack);
   }
 }
 

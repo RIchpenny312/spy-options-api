@@ -31,6 +31,35 @@ async function fetchData(query, params = []) {
     }
 }
 
+// ✅ Exportable function for snapshot logic
+async function getMarketTideSnapshot() {
+  const [latestTide] = await fetchData(`
+    SELECT * FROM market_tide_data 
+    WHERE date = CURRENT_DATE
+    ORDER BY timestamp DESC 
+    LIMIT 1
+  `);
+
+  const [rollingAvg] = await fetchData(`
+    SELECT * FROM market_tide_rolling_avg 
+    ORDER BY timestamp DESC 
+    LIMIT 1
+  `);
+
+  const [latestDelta] = await fetchData(`
+    SELECT * FROM market_tide_deltas 
+    WHERE timestamp::date = CURRENT_DATE
+    ORDER BY timestamp DESC 
+    LIMIT 1
+  `);
+
+  return {
+    latest_tide: latestTide || null,
+    rolling_avg: rollingAvg || null,
+    latest_delta: latestDelta || null
+  };
+}
+
 // ------------------------
 // ✅ API Endpoints
 // ------------------------
@@ -444,9 +473,30 @@ async function analyzePriceStructure(date = null) {
   };
 }
 
+// 🔹 Get all Market Tide Snapshots for Today
+app.get('/api/spy/market-tide/snapshot', async (req, res) => {
+  try {
+    const snapshot = await getMarketTideSnapshot();
+
+    if (!snapshot.latest_tide || !snapshot.rolling_avg || !snapshot.latest_delta) {
+      return res.status(404).json({ error: "Incomplete Market Tide snapshot" });
+    }
+
+    res.json(snapshot);
+  } catch (error) {
+    console.error("❌ Snapshot error:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------
 app.listen(PORT, () => {
     console.log(`🚀 API Server running at http://localhost:${PORT}`);
 });
+
+module.exports = {
+  getMarketTideSnapshot
+};
+

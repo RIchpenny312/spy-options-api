@@ -189,17 +189,17 @@ paths:
                       rolling_avg:
                         type: object
                         properties:
-                          avg_net_call_premium_12_intervals:
+                          avg_net_call_premium_12:
                             type: number
-                          avg_net_put_premium_12_intervals:
+                          avg_net_put_premium_12:
                             type: number
-                          avg_net_volume_12_intervals:
+                          avg_net_volume_12:
                             type: number
-                          avg_net_call_premium_48_intervals:
+                          avg_net_call_premium_48:
                             type: number
-                          avg_net_put_premium_48_intervals:
+                          avg_net_put_premium_48:
                             type: number
-                          avg_net_volume_48_intervals:
+                          avg_net_volume_48:
                             type: number
                           recorded_at:
                             type: string
@@ -385,22 +385,33 @@ paths:
 
   /api/spy/market-tide/snapshot:
     get:
-      summary: Get full Market Tide sentiment snapshot
-      description: Combines latest tide, rolling averages, and sentiment delta
+      summary: Get the latest consolidated Market Tide snapshot
+      operationId: getMarketTideSnapshot
+      description: >
+        Returns the most recent combined snapshot of net premiums, delta flows, and rolling averages.
       responses:
-        "200":
-          description: Full snapshot of institutional sentiment
+        '200':
+          description: Snapshot retrieved successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  latest_tide:
-                    type: object
-                  rolling_avg:
-                    type: object
-                  latest_delta:
-                    type: object
+                $ref: '#/components/schemas/MarketTideSnapshot'
+
+  /api/spy/market-tide/snapshot/today:
+    get:
+      summary: Get all Market Tide snapshots for today
+      operationId: getMarketTideSnapshotsToday
+      description: >
+        Returns all intraday Market Tide snapshots for the current trading day.
+      responses:
+        '200':
+          description: Today's snapshot list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MarketTideSnapshot'
 
   /api/spy/greeks:
     get:
@@ -722,3 +733,36 @@ components:
         created_at:
           type: string
           format: date-time
+    MarketTideSnapshot:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        net_call_premium:
+          type: string
+        net_put_premium:
+          type: string
+        net_volume:
+          type: integer
+        delta_call:
+          type: string
+        delta_put:
+          type: string
+        delta_volume:
+          type: integer
+        sentiment:
+          type: string
+          enum: [Bullish Trend, Bearish Trend, Neutral]
+        avg_net_call_premium_12:
+          type: string
+        avg_net_put_premium_12:
+          type: string
+        avg_net_volume_12:
+          type: number
+        avg_net_call_premium_48:
+          type: string
+        avg_net_put_premium_48:
+          type: string
+        avg_net_volume_48:
+          type: number
