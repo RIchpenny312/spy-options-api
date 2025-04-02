@@ -3,7 +3,7 @@ const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
 const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
-const { getMarketTideSnapshot } = require('./server'); // ✅ At the top of your file
+const { getMarketTideSnapshot } = require('./server');
 
 // ✅ Load environment variables
 const API_KEY = process.env.API_KEY;
@@ -78,6 +78,22 @@ async function fetchSpyOhlcData() {
   } catch (error) {
     console.error("❌ Error fetching OHLC data:", error.message);
     return [];
+  }
+}
+
+// ✅ Function to fetch Price Structure if Exists
+async function fetchPriceStructureIfExists(date) {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+  try {
+    const result = await client.query(`SELECT * FROM spy_price_structure WHERE date = $1 LIMIT 1`, [date]);
+    console.log("✅ spy_price_structure retrieved.");
+    return result.rows;
+  } catch (err) {
+    console.warn("⚠️ spy_price_structure not available or failed to fetch:", err.message);
+    return [];
+  } finally {
+    await client.end();
   }
 }
 
@@ -968,9 +984,57 @@ async function storeGreekExposureInDB(data) {
   }
 }
 
-// -----------------------
-// Fetch and Store Functions
-// -----------------------
+// ✅ Function to compute and store SPY OHLC Averages
+async function fetchAndStoreSpyOhlcAverages(client) {
+  try {
+    console.log("📊 Calculating and inserting SPY OHLC averages...");
+
+    const result = await client.query(`
+      WITH today_data AS (
+        SELECT
+          close
+        FROM
+          spy_ohlc
+        WHERE
+          start_time::date = CURRENT_DATE
+      )
+      SELECT
+        AVG(td.close)::numeric(10, 2) AS avg_close,
+        (
+          SELECT
+            close
+          FROM
+            spy_ohlc
+          WHERE
+            start_time::date = CURRENT_DATE
+          ORDER BY
+            end_time DESC
+          LIMIT 1
+        ) AS latest_close
+      FROM
+        today_data td;
+    `);
+
+    const { avg_close, latest_close } = result.rows[0];
+
+    await client.query(`
+      INSERT INTO spy_ohlc_averages (
+        date, avg_close, latest_close, recorded_at
+      )
+      VALUES (
+        CURRENT_DATE, $1, $2, NOW()
+      )
+      ON CONFLICT (date) DO UPDATE SET
+        avg_close = EXCLUDED.avg_close,
+        latest_close = EXCLUDED.latest_close,
+        recorded_at = NOW();
+    `, [avg_close, latest_close]);
+
+    console.log("✅ SPY OHLC averages stored successfully.");
+  } catch (err) {
+    console.error("❌ Error computing/inserting SPY OHLC averages:", err.message);
+  }
+}
 
 // ✅ Fetch and Store Enhanced Bid Ask Volume
 async function fetchAndStoreEnhancedBidAsk(ticker, price_open, price_close) {
@@ -1108,47 +1172,40 @@ async function insertEnhancedBidAskIntoDB(data) {
   }
 }
 
-// -----------------------
-// Compute and Store Functions
-// -----------------------
-
-// ✅ Compute and Store the DT Average for SPY OHLC
-async function fetchAndStoreSpyOhlcAverages(client) {
-  try {
-    console.log("📊 Computing and inserting SPY OHLC DT Averages...");
-
-    // Ensure client is connected
-    if (!client._connected) {
-      await client.connect();
+// ✅ Compute Market Tide Deltas
+function computeMarketTideDeltas(data) {
+  return data.map((entry, index) => {
+    if (index === 0) {
+      return {
+        timestamp: entry.timestamp,
+        delta_call: 0,
+        delta_put: 0,
+        delta_volume: 0,
+        sentiment: 'Neutral'
+      };
     }
 
-    const result = await client.query(`
-      WITH last_18_intervals AS (
-        SELECT close FROM spy_ohlc ORDER BY start_time DESC LIMIT 18
-      )
-      INSERT INTO spy_ohlc_averages (
-        date, latest_close, avg_close, recorded_at
-      )
-      SELECT 
-        CURRENT_DATE,
-        (SELECT close FROM spy_ohlc ORDER BY start_time DESC LIMIT 1),
-        COALESCE(AVG(close), 0),  -- Ensure we handle NULL values properly
-        NOW()
-      FROM last_18_intervals
-      ON CONFLICT (date) DO UPDATE SET 
-        latest_close = EXCLUDED.latest_close,
-        avg_close = EXCLUDED.avg_close,
-        recorded_at = NOW()
-      RETURNING *; -- ✅ Debugging: See what gets inserted
-    `);
+    const prev = data[index - 1];
 
-    console.log("✅ SPY OHLC DT Averages inserted successfully:", result.rows);
+    const delta_call = entry.net_call_premium - prev.net_call_premium;
+    const delta_put = entry.net_put_premium - prev.net_put_premium;
+    const delta_volume = entry.net_volume - prev.net_volume;
 
-  } catch (error) {
-    console.error("❌ Error inserting SPY OHLC DT Averages:", error.message);
-  }
+    let sentiment = 'Neutral';
+    if (delta_put < 0 && entry.net_put_premium < 0) sentiment = 'Bullish Trend';
+    else if (delta_call < 0 && entry.net_call_premium < 0) sentiment = 'Bearish Trend';
+
+    return {
+      timestamp: entry.timestamp,
+      delta_call,
+      delta_put,
+      delta_volume,
+      sentiment
+    };
+  });
 }
 
+// ✅ Store Daily OHLC Summary
 async function storeDailyOhlcSummary() {
   const client = new Client({
     host: process.env.DB_HOST,
@@ -1278,39 +1335,6 @@ async function storeDailyOhlcSummary() {
 
   await client.end();
   console.log("✅ Daily OHLC summary updated + version snapshot stored.");
-}
-
-// ✅ Compute Market Tide Deltas
-function computeMarketTideDeltas(data) {
-  return data.map((entry, index) => {
-    if (index === 0) {
-      return {
-        timestamp: entry.timestamp,
-        delta_call: 0,
-        delta_put: 0,
-        delta_volume: 0,
-        sentiment: 'Neutral'
-      };
-    }
-
-    const prev = data[index - 1];
-
-    const delta_call = entry.net_call_premium - prev.net_call_premium;
-    const delta_put = entry.net_put_premium - prev.net_put_premium;
-    const delta_volume = entry.net_volume - prev.net_volume;
-
-    let sentiment = 'Neutral';
-    if (delta_put < 0 && entry.net_put_premium < 0) sentiment = 'Bullish Trend';
-    else if (delta_call < 0 && entry.net_call_premium < 0) sentiment = 'Bearish Trend';
-
-    return {
-      timestamp: entry.timestamp,
-      delta_call,
-      delta_put,
-      delta_volume,
-      sentiment
-    };
-  });
 }
 
 // ✅ MARKET TIDE SNAPSHOT STORAGE
