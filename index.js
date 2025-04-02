@@ -1551,5 +1551,13 @@ function pause(ms) {
 
 // ✅ Run main only if explicitly called
 if (require.main === module) {
-  main();
+  main()
+    .then(() => {
+      console.log("✅ Script finished. Exiting...");
+      process.exit(0);
+    })
+    .catch(err => {
+      console.error("❌ Unhandled error in main:", err);
+      process.exit(1);
+    });
 }
