@@ -2,6 +2,11 @@ require("dotenv").config();
 const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
+const utc = require("dayjs/plugin/utc");
+const timezone = require("dayjs/plugin/timezone");
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
 const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
 const { getMarketTideSnapshot } = require('./server');
 
@@ -15,6 +20,16 @@ const DB_CONFIG = {
   password: process.env.DB_PASS,
   ssl: { rejectUnauthorized: false }
 };
+
+// ✅ Timestamp normalization helper
+const BUCKET_INTERVAL_MINUTES = 5;
+const TIMEZONE = 'America/Chicago';
+
+function normalizeToBucket(timestampUtc) {
+  const local = dayjs.utc(timestampUtc).tz(TIMEZONE);
+  const floored = Math.floor(local.minute() / BUCKET_INTERVAL_MINUTES) * BUCKET_INTERVAL_MINUTES;
+  return local.minute(floored).second(0).millisecond(0).format(); // returns ISO string
+}
 
 // ✅ Function to handle API Rate Limits (Retry on 429 Errors)
 async function fetchWithRetry(url, retries = 3, delay = 5000) {
@@ -73,7 +88,8 @@ async function fetchSpyOhlcData() {
       total_volume: parseInt(item.total_volume) || 0,
       volume: parseInt(item.volume) || 0,
       start_time: item.start_time,
-      end_time: item.end_time
+      end_time: item.end_time,
+      bucket_time: normalizeToBucket(item.start_time)
     }));
   } catch (error) {
     console.error("❌ Error fetching OHLC data:", error.message);
@@ -225,6 +241,7 @@ async function fetchMarketTideData() {
         return response.data.data.map(item => ({
             date: item.date,
             timestamp: item.timestamp,
+            bucket_time: normalizeToBucket(item.timestamp),
             net_call_premium: parseFloat(item.net_call_premium) || 0,
             net_put_premium: parseFloat(item.net_put_premium) || 0,
             net_volume: parseInt(item.net_volume) || 0
@@ -325,43 +342,45 @@ async function fetchTodayMarketTideDataFromDB() {
 
 // Function to fetch BID ASK Volume data for a given ticker
 async function fetchBidAskVolumeData(ticker) {
-    try {
-        console.log(`🔍 Fetching BID ASK Volume for ${ticker}...`);
-        const response = await fetchWithRetry(`https://api.unusualwhales.com/api/stock/${ticker}/options-volume`);
+  try {
+    console.log(`🔍 Fetching BID ASK Volume for ${ticker}...`);
+    const response = await fetchWithRetry(`https://api.unusualwhales.com/api/stock/${ticker}/options-volume`);
 
-        if (!response.data?.data || response.data.data.length === 0) {
-            throw new Error(`Invalid ${ticker} BID ASK Volume response format`);
-        }
-
-        const item = response.data.data[0];  // Extract first object
-        return [{
-            ticker: ticker.toUpperCase(),
-            date: item.date || null,
-            avg_30_day_call_volume: parseFloat(item.avg_30_day_call_volume) || 0,
-            avg_30_day_put_volume: parseFloat(item.avg_30_day_put_volume) || 0,
-            avg_3_day_call_volume: parseFloat(item.avg_3_day_call_volume) || 0,
-            avg_3_day_put_volume: parseFloat(item.avg_3_day_put_volume) || 0,
-            avg_7_day_call_volume: parseFloat(item.avg_7_day_call_volume) || 0,
-            avg_7_day_put_volume: parseFloat(item.avg_7_day_put_volume) || 0,
-            bearish_premium: parseFloat(item.bearish_premium) || 0,
-            bullish_premium: parseFloat(item.bullish_premium) || 0,
-            call_open_interest: parseInt(item.call_open_interest) || 0,
-            put_open_interest: parseInt(item.put_open_interest) || 0,
-            call_premium: parseFloat(item.call_premium) || 0,
-            put_premium: parseFloat(item.put_premium) || 0,
-            call_volume: parseInt(item.call_volume) || 0,
-            put_volume: parseInt(item.put_volume) || 0,
-            call_volume_ask_side: parseInt(item.call_volume_ask_side) || 0,
-            put_volume_ask_side: parseInt(item.put_volume_ask_side) || 0,
-            call_volume_bid_side: parseInt(item.call_volume_bid_side) || 0,
-            put_volume_bid_side: parseInt(item.put_volume_bid_side) || 0,
-            net_call_premium: parseFloat(item.net_call_premium) || 0,
-            net_put_premium: parseFloat(item.net_put_premium) || 0
-        }];
-    } catch (error) {
-        console.error(`❌ Error fetching ${ticker} BID ASK Volume:`, error.message);
-        return [];
+    if (!response.data?.data || response.data.data.length === 0) {
+      throw new Error(`Invalid ${ticker} BID ASK Volume response format`);
     }
+
+    const item = response.data.data[0];  // First record is most recent
+
+    return [{
+      ticker: ticker.toUpperCase(),
+      date: item.date || null,
+      bucket_time: normalizeToBucket(item.recorded_at),  // FIXED
+      avg_30_day_call_volume: parseFloat(item.avg_30_day_call_volume) || 0,
+      avg_30_day_put_volume: parseFloat(item.avg_30_day_put_volume) || 0,
+      avg_3_day_call_volume: parseFloat(item.avg_3_day_call_volume) || 0,
+      avg_3_day_put_volume: parseFloat(item.avg_3_day_put_volume) || 0,
+      avg_7_day_call_volume: parseFloat(item.avg_7_day_call_volume) || 0,
+      avg_7_day_put_volume: parseFloat(item.avg_7_day_put_volume) || 0,
+      bearish_premium: parseFloat(item.bearish_premium) || 0,
+      bullish_premium: parseFloat(item.bullish_premium) || 0,
+      call_open_interest: parseInt(item.call_open_interest) || 0,
+      put_open_interest: parseInt(item.put_open_interest) || 0,
+      call_premium: parseFloat(item.call_premium) || 0,
+      put_premium: parseFloat(item.put_premium) || 0,
+      call_volume: parseInt(item.call_volume) || 0,
+      put_volume: parseInt(item.put_volume) || 0,
+      call_volume_ask_side: parseInt(item.call_volume_ask_side) || 0,
+      put_volume_ask_side: parseInt(item.put_volume_ask_side) || 0,
+      call_volume_bid_side: parseInt(item.call_volume_bid_side) || 0,
+      put_volume_bid_side: parseInt(item.put_volume_bid_side) || 0,
+      net_call_premium: parseFloat(item.net_call_premium) || 0,
+      net_put_premium: parseFloat(item.net_put_premium) || 0
+    }];
+  } catch (error) {
+    console.error(`❌ Error fetching ${ticker} BID ASK Volume:`, error.message);
+    return [];
+  }
 }
 
 // ✅ Function to fetch SPY IV for 0 DTE
@@ -447,7 +466,7 @@ async function fetchGreekExposure(symbol) {
 // Storage Functions
 // -----------------------
 
-// Store SPY OHLC Data in DB
+// Store SPY OHLC Data in DB using bucket_time as conflict key
 async function storeSpyOhlcDataInDB(data) {
   if (!data.length) {
     console.warn("⚠️ No SPY OHLC data to insert.");
@@ -462,23 +481,37 @@ async function storeSpyOhlcDataInDB(data) {
 
     for (const item of data) {
       await client.query(
-        `INSERT INTO spy_ohlc (open, high, low, close, total_volume, volume, start_time, end_time, recorded_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-         ON CONFLICT (start_time) DO UPDATE SET 
-           open = EXCLUDED.open, 
-           high = EXCLUDED.high, 
-           low = EXCLUDED.low, 
-           close = EXCLUDED.close, 
-           total_volume = EXCLUDED.total_volume, 
-           volume = EXCLUDED.volume, 
-           recorded_at = NOW();`,
-        [item.open, item.high, item.low, item.close, item.total_volume, item.volume, item.start_time, item.end_time]
+        `INSERT INTO spy_ohlc (
+          open, high, low, close, total_volume, volume, 
+          start_time, end_time, recorded_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, 
+          $7, $8, NOW()
+        )
+        ON CONFLICT (start_time) DO UPDATE SET 
+          open = EXCLUDED.open, 
+          high = EXCLUDED.high, 
+          low = EXCLUDED.low, 
+          close = EXCLUDED.close, 
+          total_volume = EXCLUDED.total_volume, 
+          volume = EXCLUDED.volume,
+          recorded_at = NOW();`,
+        [
+          item.open,
+          item.high,
+          item.low,
+          item.close,
+          item.total_volume,
+          item.volume,
+          item.start_time,
+          item.end_time
+        ]
       );
     }
 
     console.log("✅ SPY OHLC Data inserted successfully.");
 
-    // ✅ Compute and Store the DT Average **AFTER** inserting
+    // Optional: Post-processing
     await fetchAndStoreSpyOhlcAverages(client);
 
   } catch (error) {
@@ -672,47 +705,56 @@ async function fetchAndStoreMarketTideAverages(client) {
     }
 }
 
-// ✅ Function to store Market Tide Data in DB
+// ✅ Function to store Market Tide Data in DB using bucket_time as unique key
 async function storeMarketTideDataInDB(data) {
-    if (!data.length) {
-        console.warn("⚠️ No Market Tide data to insert.");
-        return;
+  if (!data.length) {
+    console.warn("⚠️ No Market Tide data to insert.");
+    return;
+  }
+
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  try {
+    console.log("✅ Inserting Market Tide data into DB...");
+
+    for (const entry of data) {
+      console.log(`📊 Inserting tide @ ${entry.timestamp}`);
+
+      await client.query(`
+        INSERT INTO market_tide_data (
+          date,
+          timestamp,
+          bucket_time,
+          net_call_premium,
+          net_put_premium,
+          net_volume,
+          recorded_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT (bucket_time) DO UPDATE SET 
+          timestamp = EXCLUDED.timestamp,
+          net_call_premium = EXCLUDED.net_call_premium,
+          net_put_premium = EXCLUDED.net_put_premium,
+          net_volume = EXCLUDED.net_volume,
+          recorded_at = NOW();
+      `, [
+        entry.date,
+        entry.timestamp,
+        entry.bucket_time,
+        entry.net_call_premium,
+        entry.net_put_premium,
+        entry.net_volume
+      ]);
     }
 
-    const client = new Client(DB_CONFIG);
-    await client.connect();
+    console.log("✅ Market Tide data inserted successfully.");
+    await fetchAndStoreMarketTideAverages(client);
 
-    try {
-        console.log("✅ Inserting Market Tide data into DB...");
-
-        for (const entry of data) {
-            console.log("📊 Attempting to insert:", entry);
-
-            await client.query(`
-                INSERT INTO market_tide_data (date, timestamp, net_call_premium, net_put_premium, net_volume, recorded_at)
-                VALUES ($1, $2, $3, $4, $5, NOW())
-                ON CONFLICT (timestamp) DO UPDATE SET 
-                    net_call_premium = EXCLUDED.net_call_premium,
-                    net_put_premium = EXCLUDED.net_put_premium,
-                    net_volume = EXCLUDED.net_volume,
-                    recorded_at = NOW();
-            `, [
-                entry.date,
-                entry.timestamp,
-                entry.net_call_premium,
-                entry.net_put_premium,
-                entry.net_volume
-            ]);
-        }
-
-        console.log("✅ Market Tide data inserted successfully.");
-        await fetchAndStoreMarketTideAverages(client);
-
-    } catch (error) {
-        console.error("❌ Error inserting Market Tide Data:", error.message);
-    } finally {
-        await client.end();
-    }
+  } catch (error) {
+    console.error("❌ Error inserting Market Tide Data:", error.message);
+  } finally {
+    await client.end();
+  }
 }
 
 // ✅ Function to store Market Tide Deltas
@@ -724,15 +766,30 @@ async function storeMarketTideDeltasInDB(deltas) {
     console.log("📊 Inserting Market Tide Deltas...");
     for (const d of deltas) {
       await client.query(`
-        INSERT INTO market_tide_deltas (timestamp, delta_call, delta_put, delta_volume, sentiment, recorded_at)
-        VALUES ($1, $2, $3, $4, $5, NOW())
+        INSERT INTO market_tide_deltas (
+            timestamp,
+            bucket_time,
+            delta_call,
+            delta_put,
+            delta_volume,
+            sentiment,
+            recorded_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
         ON CONFLICT (timestamp) DO UPDATE SET 
-          delta_call = EXCLUDED.delta_call,
-          delta_put = EXCLUDED.delta_put,
-          delta_volume = EXCLUDED.delta_volume,
-          sentiment = EXCLUDED.sentiment,
-          recorded_at = NOW();
-      `, [d.timestamp, d.delta_call, d.delta_put, d.delta_volume, d.sentiment]);
+            bucket_time = EXCLUDED.bucket_time,
+            delta_call = EXCLUDED.delta_call,
+            delta_put = EXCLUDED.delta_put,
+            delta_volume = EXCLUDED.delta_volume,
+            sentiment = EXCLUDED.sentiment,
+            recorded_at = NOW();
+      `, [
+        d.timestamp,
+        d.bucket_time,
+        d.delta_call,
+        d.delta_put,
+        d.delta_volume,
+        d.sentiment
+      ]);
     }
     console.log("✅ Market Tide Deltas stored.");
   } catch (error) {
@@ -748,21 +805,38 @@ async function storeBidAskVolumeDataInDB(data) {
   await client.connect();
   try {
     for (const item of data) {
-      const symbol = item.ticker ? item.ticker.toUpperCase() : "UNKNOWN"; // Fix undefined symbol issue
+      const symbol = item.ticker ? item.ticker.toUpperCase() : "UNKNOWN";
       console.log(`📊 Inserting BID ASK Volume for ${symbol}:`, JSON.stringify(item, null, 2));
 
       await client.query(
         `INSERT INTO bid_ask_volume_data (
-            symbol, date, avg_30_day_call_volume, avg_30_day_put_volume, 
-            avg_3_day_call_volume, avg_3_day_put_volume, avg_7_day_call_volume, avg_7_day_put_volume,
-            bearish_premium, bullish_premium, call_open_interest, put_open_interest,
-            call_premium, put_premium, call_volume, put_volume, call_volume_ask_side, put_volume_ask_side,
-            call_volume_bid_side, put_volume_bid_side, net_call_premium, net_put_premium, recorded_at
+            symbol, date, bucket_time,
+            avg_30_day_call_volume, avg_30_day_put_volume,
+            avg_3_day_call_volume, avg_3_day_put_volume,
+            avg_7_day_call_volume, avg_7_day_put_volume,
+            bearish_premium, bullish_premium,
+            call_open_interest, put_open_interest,
+            call_premium, put_premium,
+            call_volume, put_volume,
+            call_volume_ask_side, put_volume_ask_side,
+            call_volume_bid_side, put_volume_bid_side,
+            net_call_premium, net_put_premium,
+            recorded_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 
-            $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW()
+            $1, $2, $3,
+            $4, $5,
+            $6, $7,
+            $8, $9,
+            $10, $11,
+            $12, $13,
+            $14, $15,
+            $16, $17,
+            $18, $19,
+            $20, $21,
+            $22, $23,
+            NOW()
         )
-        ON CONFLICT (symbol, date)
+        ON CONFLICT (symbol, bucket_time)
         DO UPDATE SET 
             avg_30_day_call_volume = EXCLUDED.avg_30_day_call_volume,
             avg_30_day_put_volume = EXCLUDED.avg_30_day_put_volume,
@@ -786,13 +860,29 @@ async function storeBidAskVolumeDataInDB(data) {
             net_put_premium = EXCLUDED.net_put_premium,
             recorded_at = NOW();`,
         [
-          symbol, item.date, item.avg_30_day_call_volume, item.avg_30_day_put_volume,
-          item.avg_3_day_call_volume, item.avg_3_day_put_volume, item.avg_7_day_call_volume, item.avg_7_day_put_volume,
-          item.bearish_premium, item.bullish_premium, item.call_open_interest, item.put_open_interest,
-          item.call_premium, item.put_premium, item.call_volume, item.put_volume,
-          item.call_volume_ask_side, item.put_volume_ask_side,
-          item.call_volume_bid_side, item.put_volume_bid_side,
-          item.net_call_premium, item.net_put_premium
+          symbol,
+          item.date,
+          item.bucket_time,
+          item.avg_30_day_call_volume,
+          item.avg_30_day_put_volume,
+          item.avg_3_day_call_volume,
+          item.avg_3_day_put_volume,
+          item.avg_7_day_call_volume,
+          item.avg_7_day_put_volume,
+          item.bearish_premium,
+          item.bullish_premium,
+          item.call_open_interest,
+          item.put_open_interest,
+          item.call_premium,
+          item.put_premium,
+          item.call_volume,
+          item.put_volume,
+          item.call_volume_ask_side,
+          item.put_volume_ask_side,
+          item.call_volume_bid_side,
+          item.put_volume_bid_side,
+          item.net_call_premium,
+          item.net_put_premium
         ]
       );
     }
@@ -811,14 +901,21 @@ async function storeBidShiftSignals(bidAskData) {
 
   try {
     for (const current of bidAskData) {
-      const { ticker, call_volume_bid_side, put_volume_bid_side, volume_delta_call, volume_delta_put } = current;
-      const symbol = ticker.toUpperCase();
-      const recorded_at = new Date(); // or use current.date if needed
+      const {
+        ticker, call_volume_bid_side, put_volume_bid_side,
+        volume_delta_call, volume_delta_put, bucket_time
+      } = current;
 
-      // Step 1: Determine current dominant side
+      if (!bucket_time) {
+        console.warn(`⚠️ Skipping ${ticker} — missing bucket_time`);
+        continue;
+      }
+
+      const symbol = ticker.toUpperCase();
+      const recorded_at = new Date();
+
       const dominant_side = put_volume_bid_side > call_volume_bid_side ? 'PUT' : 'CALL';
 
-      // Step 2: Get previous dominant_side from DB
       const prevQuery = await client.query(
         `SELECT dominant_side FROM bid_shift_signals WHERE symbol = $1 ORDER BY recorded_at DESC LIMIT 1`,
         [symbol]
@@ -826,37 +923,41 @@ async function storeBidShiftSignals(bidAskData) {
 
       const previous_dominant_side = prevQuery.rows.length ? prevQuery.rows[0].dominant_side : null;
 
-      // Step 3: Detect shift
       let shift_type = 'NONE';
       if (previous_dominant_side && dominant_side !== previous_dominant_side) {
         shift_type = `${previous_dominant_side}_TO_${dominant_side}`;
       }
 
-      // Step 4: Flag continuation
       const continuation = previous_dominant_side === dominant_side;
 
-      // Step 5: Confirm delta
-      let delta_confirmation = false;
-      if (
+      const delta_confirmation = (
         (dominant_side === 'PUT' && volume_delta_put > 0) ||
         (dominant_side === 'CALL' && volume_delta_call > 0)
-      ) {
-        delta_confirmation = true;
-      }
+      );
 
-      // Step 6: Assign confidence
       let confidence = 'Low';
       if (shift_type !== 'NONE' && delta_confirmation) confidence = 'High';
       else if (continuation && delta_confirmation) confidence = 'Moderate';
 
-      // Step 7: Insert into DB
       await client.query(
         `INSERT INTO bid_shift_signals (
-          symbol, recorded_at, dominant_side, previous_dominant_side, shift_type, continuation, delta_confirmation, confidence
+          symbol, recorded_at, bucket_time, dominant_side, previous_dominant_side,
+          shift_type, continuation, delta_confirmation, confidence
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8
-        )`,
-        [symbol, recorded_at, dominant_side, previous_dominant_side, shift_type, continuation, delta_confirmation, confidence]
+          $1, $2, $3, $4, $5, $6, $7, $8, $9
+        )
+        ON CONFLICT (symbol, bucket_time) DO UPDATE SET
+          dominant_side = EXCLUDED.dominant_side,
+          previous_dominant_side = EXCLUDED.previous_dominant_side,
+          shift_type = EXCLUDED.shift_type,
+          continuation = EXCLUDED.continuation,
+          delta_confirmation = EXCLUDED.delta_confirmation,
+          confidence = EXCLUDED.confidence,
+          recorded_at = NOW();`,
+        [
+          symbol, recorded_at, bucket_time, dominant_side,
+          previous_dominant_side, shift_type, continuation, delta_confirmation, confidence
+        ]
       );
 
       console.log(`✅ Shift Signal Inserted for ${symbol}: ${shift_type} | Continuation: ${continuation} | Confidence: ${confidence}`);
@@ -1178,6 +1279,7 @@ function computeMarketTideDeltas(data) {
     if (index === 0) {
       return {
         timestamp: entry.timestamp,
+        bucket_time: entry.bucket_time,
         delta_call: 0,
         delta_put: 0,
         delta_volume: 0,
@@ -1197,6 +1299,7 @@ function computeMarketTideDeltas(data) {
 
     return {
       timestamp: entry.timestamp,
+      bucket_time: entry.bucket_time,
       delta_call,
       delta_put,
       delta_volume,
