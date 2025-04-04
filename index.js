@@ -1511,6 +1511,26 @@ async function storeMarketTideSnapshotInDB() {
   }
 }
 
+// ✅ Get Last Delta Bucket Time Helper Function
+async function getLastStoredDeltaBucketTime() {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+  try {
+    const result = await client.query(`
+      SELECT bucket_time FROM market_tide_deltas
+      WHERE trading_day = CURRENT_DATE
+      ORDER BY bucket_time DESC
+      LIMIT 1;
+    `);
+    return result.rows.length > 0 ? new Date(result.rows[0].bucket_time) : null;
+  } catch (err) {
+    console.error("❌ Failed to fetch last delta bucket_time:", err.message);
+    return null;
+  } finally {
+    await client.end();
+  }
+}
+
 // -----------------------
 // Main function to fetch and store all SPY datasets
 // -----------------------
@@ -1610,7 +1630,7 @@ async function main() {
       await storeBidShiftSignals(bidAskSpy);
     }
 
-    // Compute Delta Trends for Today
+    // Fetch and Store Enhanced Bid Ask Volume
     const spyPriceOpen = 523.12;  // Replace with OHLC open
     const spyPriceClose = 525.65; // Replace with OHLC close
     const spxPriceOpen = 5263.44;
@@ -1625,11 +1645,31 @@ async function main() {
     await fetchAndStoreEnhancedBidAsk("QQQ", qqqPriceOpen, qqqPriceClose);
     await fetchAndStoreEnhancedBidAsk("NDX", ndxPriceOpen, ndxPriceClose);
 
-    // ✅ Compute Delta Trends for Today
+    // ✅ Compute Delta Trends for Today — Bucket-Time Safe
     const todayMarketTideData = await fetchTodayMarketTideDataFromDB();
-    if (todayMarketTideData.length > 1) {
-      const deltas = computeMarketTideDeltas(todayMarketTideData);
+    const lastStoredBucketTime = await getLastStoredDeltaBucketTime();
+
+    const sorted = todayMarketTideData.sort(
+      (a, b) => new Date(a.bucket_time) - new Date(b.bucket_time)
+    );
+
+    const newEntries = lastStoredBucketTime
+      ? sorted.filter(entry => new Date(entry.bucket_time) > lastStoredBucketTime)
+      : sorted;
+
+    if (newEntries.length > 0) {
+      const baseIndex = sorted.findIndex(entry =>
+        new Date(entry.bucket_time).getTime() === lastStoredBucketTime?.getTime()
+      );
+      const baseEntry = baseIndex >= 0 ? sorted[baseIndex] : null;
+
+      const dataToCompute = baseEntry ? [baseEntry, ...newEntries] : newEntries;
+      const deltas = computeMarketTideDeltas(dataToCompute).slice(1);
+
       await storeMarketTideDeltasInDB(deltas);
+      console.log(`✅ Stored ${deltas.length} new delta records.`);
+    } else {
+      console.log("✅ No new market tide entries to compute deltas for.");
     }
 
     // ✅ EOD summary + snapshot
