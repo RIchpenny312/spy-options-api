@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { Client } = require('pg');
+const { getTimeContextET } = require('./utils/time');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -489,14 +490,73 @@ app.get('/api/spy/market-tide/snapshot', async (req, res) => {
   }
 });
 
+// 🔹 GPT Market Analysis Endpoint
+app.post('/api/gpt-analysis', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+
+    const [ohlcData, deltas, greeks, bidVolume] = await Promise.all([
+      fetchData(`
+        SELECT open, high, low, close, total_volume, volume, start_time, end_time
+        FROM spy_ohlc 
+        WHERE start_time::date = $1 
+        ORDER BY start_time ASC
+      `, [today]),
+      fetchData(`
+        SELECT timestamp, delta_call, delta_put, delta_volume, sentiment
+        FROM market_tide_deltas 
+        WHERE timestamp::date = $1 
+        ORDER BY timestamp ASC
+      `, [today]),
+      fetchData(`
+        SELECT strike, call_gex, put_gex, call_delta, put_delta, call_vanna, put_vanna, call_charm, put_charm, price, time
+        FROM spy_greek_exposure_strike 
+        ORDER BY time DESC 
+        LIMIT 10
+      `),
+      fetchData(`
+        SELECT * FROM bid_ask_volume_data 
+        WHERE symbol = 'SPY' 
+        ORDER BY date DESC 
+        LIMIT 1
+      `)
+    ]);
+
+    const marketTide = await getMarketTideSnapshot();
+    const timeContext = getTimeContextET();
+
+    const gptPayload = {
+      ohlc: ohlcData,
+      market_tide: marketTide,
+      deltas,
+      greeks,
+      bid_volume: bidVolume[0] || null,
+      time_context: timeContext
+    };
+
+    const gptResult = await runGptAnalysis(gptPayload); // Stub for now
+    res.json({ result: gptResult });
+
+  } catch (error) {
+    console.error("❌ GPT analysis failed:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// 🔹 GPT Analysis Stub (placeholder for OpenAI or logic)
+async function runGptAnalysis(payload) {
+  const { time_context } = payload;
+  return `Simulated GPT analysis result at ${time_context.time} ET on ${time_context.date}.`;
+}
+
 // ------------------------
 // ✅ Start Server
 // ------------------------
 app.listen(PORT, () => {
-    console.log(`🚀 API Server running at http://localhost:${PORT}`);
+  console.log(`🚀 API Server running at http://localhost:${PORT}`);
 });
 
 module.exports = {
-  getMarketTideSnapshot
+  getMarketTideSnapshot,
+  runGptAnalysis
 };
-
