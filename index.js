@@ -83,8 +83,13 @@ async function fetchSpyOhlcData() {
       throw new Error("Invalid OHLC response format");
     }
 
-    const today = dayjs().format("YYYY-MM-DD");
-    const filteredData = response.data.data.filter(item => item.start_time.startsWith(today));
+    // Use Chicago-local date for comparison
+    const today = dayjs().tz(TIMEZONE).format("YYYY-MM-DD");
+
+    const filteredData = response.data.data.filter(item => {
+      const localStartTime = dayjs.utc(item.start_time).tz(TIMEZONE).format("YYYY-MM-DD");
+      return localStartTime === today;
+    });
 
     if (filteredData.length === 0) {
       console.log("⚠️ No OHLC data found for today. Skipping insertion.");
@@ -98,9 +103,9 @@ async function fetchSpyOhlcData() {
       close: parseFloat(item.close) || 0,
       total_volume: parseInt(item.total_volume) || 0,
       volume: parseInt(item.volume) || 0,
-      start_time: item.start_time,
-      end_time: item.end_time,
-      bucket_time: normalizeToBucket(item.start_time)
+      start_time: dayjs.utc(item.start_time).tz(TIMEZONE).toISOString(),
+      end_time: dayjs.utc(item.end_time).tz(TIMEZONE).toISOString(),
+      bucket_time: normalizeToBucket(item.start_time) // this already handles TZ conversion
     }));
   } catch (error) {
     console.error("❌ Error fetching OHLC data:", error.message);
@@ -241,30 +246,30 @@ async function fetchSpyOptionPriceLevels() {
 
 // ✅ Function to fetch Market Tide Data
 async function fetchMarketTideData() {
-    try {
-        console.log("🔍 Fetching Market Tide Data...");
-        const response = await fetchWithRetry("https://api.unusualwhales.com/api/market/market-tide?otm_only=false&interval_5m=true");
+  try {
+    console.log("🔍 Fetching Market Tide Data...");
+    const response = await fetchWithRetry("https://api.unusualwhales.com/api/market/market-tide?otm_only=false&interval_5m=true");
 
-        if (!response.data?.data || !Array.isArray(response.data.data)) {
-            throw new Error("Invalid Market Tide response format");
-        }
-
-        return response.data.data.map(item => ({
-            date: item.date,
-            timestamp: item.timestamp,
-            bucket_time: normalizeToBucket(item.timestamp),
-            net_call_premium: parseFloat(item.net_call_premium) || 0,
-            net_put_premium: parseFloat(item.net_put_premium) || 0,
-            net_volume: parseInt(item.net_volume) || 0
-        }));
-    } catch (error) {
-        if (error.response && error.response.status === 404) {
-            console.warn("⚠️ Market Tide API returned 404. Skipping this dataset.");
-            return [];
-        }
-        console.error("❌ Error fetching Market Tide Data:", error.message);
-        return [];
+    if (!response.data?.data || !Array.isArray(response.data.data)) {
+      throw new Error("Invalid Market Tide response format");
     }
+
+    return response.data.data.map(item => ({
+      date: dayjs.utc(item.timestamp).tz(TIMEZONE).format("YYYY-MM-DD"), // ensure date consistency with Chicago TZ
+      timestamp: dayjs.utc(item.timestamp).tz(TIMEZONE).toISOString(),
+      bucket_time: normalizeToBucket(item.timestamp), // already handles Chicago time
+      net_call_premium: parseFloat(item.net_call_premium) || 0,
+      net_put_premium: parseFloat(item.net_put_premium) || 0,
+      net_volume: parseInt(item.net_volume) || 0
+    }));
+  } catch (error) {
+    if (error.response?.status === 404) {
+      console.warn("⚠️ Market Tide API returned 404. Skipping this dataset.");
+      return [];
+    }
+    console.error("❌ Error fetching Market Tide Data:", error.message);
+    return [];
+  }
 }
 
 // ✅ Function to fetch and store 1-hour & 4-hour rolling averages of Market Tide Data
@@ -330,16 +335,16 @@ async function fetchAndStoreMarketTideRollingAvg(client) {
     }
 }
 
-// Function to fetch Today Market Tide Data
+// ✅ Function to fetch Today's Market Tide Data (Chicago-time safe)
 async function fetchTodayMarketTideDataFromDB() {
   const client = new Client(DB_CONFIG);
   await client.connect();
 
   try {
     const result = await client.query(`
-      SELECT date, timestamp, net_call_premium, net_put_premium, net_volume
+      SELECT trading_day AS date, timestamp, net_call_premium, net_put_premium, net_volume
       FROM market_tide_data
-      WHERE date = CURRENT_DATE
+      WHERE trading_day = CURRENT_DATE
       ORDER BY timestamp ASC;
     `);
     return result.rows;
@@ -477,7 +482,7 @@ async function fetchGreekExposure(symbol) {
 // Storage Functions
 // -----------------------
 
-// Store SPY OHLC Data in DB using bucket_time as conflict key
+// ✅ Store SPY OHLC Data in DB using (bucket_time, start_time) as conflict key
 async function storeSpyOhlcDataInDB(data) {
   if (!data.length) {
     console.warn("⚠️ No SPY OHLC data to insert.");
@@ -494,12 +499,12 @@ async function storeSpyOhlcDataInDB(data) {
       await client.query(
         `INSERT INTO spy_ohlc (
           open, high, low, close, total_volume, volume, 
-          start_time, end_time, recorded_at
+          start_time, end_time, bucket_time, recorded_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, 
-          $7, $8, NOW()
+          $7, $8, $9, NOW()
         )
-        ON CONFLICT (start_time) DO UPDATE SET 
+        ON CONFLICT (bucket_time, start_time) DO UPDATE SET 
           open = EXCLUDED.open, 
           high = EXCLUDED.high, 
           low = EXCLUDED.low, 
@@ -515,14 +520,13 @@ async function storeSpyOhlcDataInDB(data) {
           item.total_volume,
           item.volume,
           item.start_time,
-          item.end_time
+          item.end_time,
+          item.bucket_time // ✅ new field
         ]
       );
     }
 
     console.log("✅ SPY OHLC Data inserted successfully.");
-
-    // Optional: Post-processing
     await fetchAndStoreSpyOhlcAverages(client);
 
   } catch (error) {
@@ -716,7 +720,7 @@ async function fetchAndStoreMarketTideAverages(client) {
     }
 }
 
-// ✅ Function to store Market Tide Data in DB using bucket_time as unique key
+// ✅ Function to store Market Tide Data in DB using (date, bucket_time) as conflict key
 async function storeMarketTideDataInDB(data) {
   if (!data.length) {
     console.warn("⚠️ No Market Tide data to insert.");
@@ -742,7 +746,7 @@ async function storeMarketTideDataInDB(data) {
           net_volume,
           recorded_at
         ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT (bucket_time) DO UPDATE SET 
+        ON CONFLICT (date, bucket_time) DO UPDATE SET 
           timestamp = EXCLUDED.timestamp,
           net_call_premium = EXCLUDED.net_call_premium,
           net_put_premium = EXCLUDED.net_put_premium,
