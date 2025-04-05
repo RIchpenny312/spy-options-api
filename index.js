@@ -1,4 +1,5 @@
 require("dotenv").config();
+console.log("✅ Loaded TIMEZONE:", process.env.TIMEZONE);
 const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
@@ -6,6 +7,17 @@ const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+let TIMEZONE = process.env.TIMEZONE || 'America/Chicago';
+
+try {
+  dayjs.tz.setDefault(TIMEZONE);
+  console.log(`✅ Timezone set to: ${TIMEZONE}`);
+} catch (err) {
+  console.warn(`⚠️ Invalid timezone: ${TIMEZONE}. Falling back to America/Chicago`);
+  TIMEZONE = 'America/Chicago';
+  dayjs.tz.setDefault(TIMEZONE);
+}
 
 const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
 const { getMarketTideSnapshot } = require('./server');
@@ -23,7 +35,6 @@ const DB_CONFIG = {
 
 // ✅ Timestamp normalization helper
 const BUCKET_INTERVAL_MINUTES = 5;
-const TIMEZONE = 'America/Chicago';
 
 function normalizeToBucket(timestampUtc) {
   const local = dayjs.utc(timestampUtc).tz(TIMEZONE);
