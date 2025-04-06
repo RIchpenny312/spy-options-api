@@ -723,7 +723,7 @@ async function fetchAndStoreMarketTideAverages(client) {
     }
 }
 
-// ✅ Function to store Market Tide Data in DB using (date, bucket_time) as conflict key
+// ✅ Function to store Market Tide Data in DB using (bucket_time, timestamp) as conflict key
 async function storeMarketTideDataInDB(data) {
   if (!data.length) {
     console.warn("⚠️ No Market Tide data to insert.");
@@ -749,8 +749,7 @@ async function storeMarketTideDataInDB(data) {
           net_volume,
           recorded_at
         ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT (date, bucket_time) DO UPDATE SET 
-          timestamp = EXCLUDED.timestamp,
+        ON CONFLICT (bucket_time, timestamp) DO UPDATE SET 
           net_call_premium = EXCLUDED.net_call_premium,
           net_put_premium = EXCLUDED.net_put_premium,
           net_volume = EXCLUDED.net_volume,
