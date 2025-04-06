@@ -10,6 +10,7 @@ dayjs.extend(timezone);
 const { fetchAndStoreDarkPoolData } = require('./services/darkPoolService');
 const { getTopDarkPoolLevels } = require('./services/darkPoolLevelsService');
 const { storeDarkPoolLevelsInDB } = require('./services/storeDarkPoolLevels');
+const { processAndInsertDeltaTrend } = require('./services/deltaTrendService');
 
 let TIMEZONE = process.env.TIMEZONE || 'America/Chicago';
 
@@ -781,48 +782,6 @@ async function storeMarketTideDataInDB(data) {
   }
 }
 
-// ✅ Function to store Market Tide Deltas
-async function storeMarketTideDeltasInDB(deltas) {
-  const client = new Client(DB_CONFIG);
-  await client.connect();
-
-  try {
-    console.log("📊 Inserting Market Tide Deltas...");
-    for (const d of deltas) {
-      await client.query(`
-        INSERT INTO market_tide_deltas (
-            timestamp,
-            bucket_time,
-            delta_call,
-            delta_put,
-            delta_volume,
-            sentiment,
-            recorded_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT (timestamp) DO UPDATE SET 
-            bucket_time = EXCLUDED.bucket_time,
-            delta_call = EXCLUDED.delta_call,
-            delta_put = EXCLUDED.delta_put,
-            delta_volume = EXCLUDED.delta_volume,
-            sentiment = EXCLUDED.sentiment,
-            recorded_at = NOW();
-      `, [
-        d.timestamp,
-        d.bucket_time,
-        d.delta_call,
-        d.delta_put,
-        d.delta_volume,
-        d.sentiment
-      ]);
-    }
-    console.log("✅ Market Tide Deltas stored.");
-  } catch (error) {
-    console.error("❌ Error storing Market Tide Deltas:", error.message);
-  } finally {
-    await client.end();
-  }
-}
-
 // Function to store BID ASK Volume Data in DB
 async function storeBidAskVolumeDataInDB(data) {
   const client = new Client(DB_CONFIG);
@@ -1297,41 +1256,6 @@ async function insertEnhancedBidAskIntoDB(data) {
   }
 }
 
-// ✅ Compute Market Tide Deltas
-function computeMarketTideDeltas(data) {
-  return data.map((entry, index) => {
-    if (index === 0) {
-      return {
-        timestamp: entry.timestamp,
-        bucket_time: entry.bucket_time,
-        delta_call: 0,
-        delta_put: 0,
-        delta_volume: 0,
-        sentiment: 'Neutral'
-      };
-    }
-
-    const prev = data[index - 1];
-
-    const delta_call = entry.net_call_premium - prev.net_call_premium;
-    const delta_put = entry.net_put_premium - prev.net_put_premium;
-    const delta_volume = entry.net_volume - prev.net_volume;
-
-    let sentiment = 'Neutral';
-    if (delta_put < 0 && entry.net_put_premium < 0) sentiment = 'Bullish Trend';
-    else if (delta_call < 0 && entry.net_call_premium < 0) sentiment = 'Bearish Trend';
-
-    return {
-      timestamp: entry.timestamp,
-      bucket_time: entry.bucket_time,
-      delta_call,
-      delta_put,
-      delta_volume,
-      sentiment
-    };
-  });
-}
-
 // ✅ Store Daily OHLC Summary
 async function storeDailyOhlcSummary() {
   const client = new Client({
@@ -1684,31 +1608,24 @@ async function main() {
     await fetchAndStoreEnhancedBidAsk("QQQ", qqqPriceOpen, qqqPriceClose);
     await fetchAndStoreEnhancedBidAsk("NDX", ndxPriceOpen, ndxPriceClose);
 
-    // ✅ Compute Delta Trends for Today — Bucket-Time Safe
-    const todayMarketTideData = await fetchTodayMarketTideDataFromDB();
-    const lastStoredBucketTime = await getLastStoredDeltaBucketTime();
+    // ✅ Compute and insert latest delta trend with signals
+    const client = new Client({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      ssl: { rejectUnauthorized: false }
+    });
 
-    const sorted = todayMarketTideData.sort(
-      (a, b) => new Date(a.bucket_time) - new Date(b.bucket_time)
-    );
-
-    const newEntries = lastStoredBucketTime
-      ? sorted.filter(entry => new Date(entry.bucket_time) > lastStoredBucketTime)
-      : sorted;
-
-    if (newEntries.length > 0) {
-      const baseIndex = sorted.findIndex(entry =>
-        new Date(entry.bucket_time).getTime() === lastStoredBucketTime?.getTime()
-      );
-      const baseEntry = baseIndex >= 0 ? sorted[baseIndex] : null;
-
-      const dataToCompute = baseEntry ? [baseEntry, ...newEntries] : newEntries;
-      const deltas = computeMarketTideDeltas(dataToCompute).slice(1);
-
-      await storeMarketTideDeltasInDB(deltas);
-      console.log(`✅ Stored ${deltas.length} new delta records.`);
-    } else {
-      console.log("✅ No new market tide entries to compute deltas for.");
+    await client.connect();
+    try {
+      console.log("📈 Running delta trend processor with PCBS/CCBS signal logic...");
+      await processAndInsertDeltaTrend(client);
+    } catch (err) {
+      console.error("❌ Error running delta trend processor:", err.message);
+    } finally {
+      await client.end();
     }
 
     // ✅ EOD summary + snapshot
