@@ -180,7 +180,7 @@ await client.query(`
     $12, $13,
     $14
   )
-  ON CONFLICT (timestamp) DO UPDATE
+  ON CONFLICT (bucket_time) DO UPDATE
   SET
     delta_call               = $3,
     delta_put                = $4,
@@ -193,7 +193,7 @@ await client.query(`
     bounce_signal_strength   = $11,
     bearish_signal           = $12,
     bearish_signal_strength  = $13,
-    recorded_at              = $14;
+    recorded_at              = $14
 `, [
   latest.timestamp,
   bucketTime,
