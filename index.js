@@ -723,7 +723,7 @@ async function fetchAndStoreMarketTideAverages(client) {
     }
 }
 
-// ✅ Function to store Market Tide Data in DB using (bucket_time, timestamp) as conflict key
+// ✅ Function to store Market Tide Data in DB using (timestamp, bucket_time) as conflict key
 async function storeMarketTideDataInDB(data) {
   if (!data.length) {
     console.warn("⚠️ No Market Tide data to insert.");
@@ -739,7 +739,8 @@ async function storeMarketTideDataInDB(data) {
     for (const entry of data) {
       console.log(`📊 Inserting tide @ ${entry.timestamp}`);
 
-      await client.query(`
+      await client.query(
+        `
         INSERT INTO market_tide_data (
           date,
           timestamp,
@@ -748,23 +749,29 @@ async function storeMarketTideDataInDB(data) {
           net_put_premium,
           net_volume,
           recorded_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT (bucket_time, timestamp) DO UPDATE SET 
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, NOW()
+        )
+        ON CONFLICT (timestamp, bucket_time) DO UPDATE SET 
           net_call_premium = EXCLUDED.net_call_premium,
           net_put_premium = EXCLUDED.net_put_premium,
           net_volume = EXCLUDED.net_volume,
           recorded_at = NOW();
-      `, [
-        entry.date,
-        entry.timestamp,
-        entry.bucket_time,
-        entry.net_call_premium,
-        entry.net_put_premium,
-        entry.net_volume
-      ]);
+        `,
+        [
+          entry.date,
+          entry.timestamp,
+          entry.bucket_time,
+          entry.net_call_premium,
+          entry.net_put_premium,
+          entry.net_volume
+        ]
+      );
     }
 
     console.log("✅ Market Tide data inserted successfully.");
+
+    // Optionally refresh rolling averages after insertion
     await fetchAndStoreMarketTideAverages(client);
 
   } catch (error) {
