@@ -705,6 +705,59 @@ paths:
                 items:
                   $ref: '#/components/schemas/BidShiftSignal'
 
+  /api/darkpool/top:
+    get:
+      summary: Get top SPY dark pool levels
+      description: |
+        Returns the top aggregated SPY dark pool price levels for a given trading day.
+        If no date is provided, the latest available trading day will be used as fallback.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Specific trading date (YYYY-MM-DD) to fetch levels for.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+          description: Number of top levels to return.
+      responses:
+        '200':
+          description: A list of top SPY dark pool price levels.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trading_day:
+                    type: string
+                    format: date
+                  fallback_date:
+                    type: string
+                    format: date
+                  top_levels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        price:
+                          type: number
+                        total_premium:
+                          type: number
+                        total_volume:
+                          type: integer
+                        total_size:
+                          type: integer
+                        trade_count:
+                          type: integer
+        '500':
+          description: Internal Server Error
+
 components:
   schemas:
     BidShiftSignal:

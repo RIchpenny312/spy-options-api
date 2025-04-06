@@ -7,6 +7,9 @@ const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
 dayjs.extend(utc);
 dayjs.extend(timezone);
+const { fetchAndStoreDarkPoolData } = require('./services/darkPoolService');
+const { getTopDarkPoolLevels } = require('./services/darkPoolLevelsService');
+const { storeDarkPoolLevelsInDB } = require('./services/storeDarkPoolLevels');
 
 let TIMEZONE = process.env.TIMEZONE || 'America/Chicago';
 
@@ -1555,7 +1558,22 @@ async function main() {
   try {
     const today = new Date().toISOString().split("T")[0];
     await ensureSpyPartitionForDate(today);
-    console.log(`✅ Ensured partition exists for ${today}`);	
+    console.log(`✅ Ensured partition exists for ${today}`);
+    
+    // 📥 Step 1: Fetch raw dark pool trade data
+    await fetchAndStoreDarkPoolData();
+    console.log("✅ Dark pool trade data fetched and stored.");
+
+    // 🧠 Step 2: Aggregate top SPY dark pool levels
+    const topLevels = await getTopDarkPoolLevels();
+    console.log("✅ Aggregated top SPY dark pool levels:");
+    console.table(topLevels.top_levels);
+
+    // 💾 Step 3: Store top levels in the database
+    if (topLevels?.top_levels?.length > 0) {
+      await storeDarkPoolLevelsInDB(topLevels);
+    }
+	
     console.log("📢 Calling fetchSpyIV0DTE...");
     const spyIV0DTE = await fetchSpyIV0DTE();
     console.log("✅ SPY IV 0 DTE Data Fetched:", spyIV0DTE);

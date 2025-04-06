@@ -6,6 +6,8 @@ const { getTimeContext } = require('./utils/time');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
+const { getTopDarkPoolLevels } = require('./services/darkPoolLevelsService');
+
 
 // ✅ PostgreSQL Connection Config
 const DB_CONFIG = {
@@ -548,6 +550,44 @@ async function runGptAnalysis(payload) {
   const { time_context } = payload;
   return `Simulated GPT analysis result at ${time_context.time} ET on ${time_context.date}.`;
 }
+
+// ✅ Get the most recent trading day with dark pool levels
+async function getMostRecentDarkPoolDate() {
+  const result = await fetchData(`
+    SELECT DISTINCT trading_day
+    FROM spy_dark_pool_levels
+    ORDER BY trading_day DESC
+    LIMIT 1
+  `);
+
+  return result[0]?.trading_day || null;
+}
+
+// 🔹 Fetch SPY Dark Pool Top Levels
+app.get('/api/darkpool/top', async (req, res) => {
+  try {
+    let date = req.query.date || null;
+    const limit = parseInt(req.query.limit) || 10;
+
+    // If no date is passed, or if there's no data for the given date, fallback
+    if (!date) {
+      date = await getMostRecentDarkPoolDate();
+    }
+
+    let result = await getTopDarkPoolLevels({ date, limit });
+
+    // Fallback again if result is empty (e.g., invalid date passed in)
+    if (!result.top_levels || result.top_levels.length === 0) {
+      date = await getMostRecentDarkPoolDate();
+      result = await getTopDarkPoolLevels({ date, limit });
+    }
+
+    res.json({ ...result, fallback_date: date });
+  } catch (err) {
+    console.error("❌ Error in /api/darkpool/top:", err.message);
+    res.status(500).json({ error: "Failed to retrieve dark pool levels" });
+  }
+});
 
 // ------------------------
 // ✅ Start Server
