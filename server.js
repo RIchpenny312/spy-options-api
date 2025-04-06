@@ -7,6 +7,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
 const { getTopDarkPoolLevels } = require('./services/darkPoolLevelsService');
+const { processAndInsertDeltaTrend } = require("./services/deltaTrendService");
+const dayjs = require("dayjs");
 
 
 // ✅ PostgreSQL Connection Config
@@ -586,6 +588,23 @@ app.get('/api/darkpool/top', async (req, res) => {
   } catch (err) {
     console.error("❌ Error in /api/darkpool/top:", err.message);
     res.status(500).json({ error: "Failed to retrieve dark pool levels" });
+  }
+});
+
+// 🔹 Run Delta Trend Computation (for specific date or today)
+app.get('/api/spy/delta-trend/:date?', async (req, res) => {
+  try {
+    const inputDate = req.params.date || dayjs().format("YYYY-MM-DD");
+
+    await processAndInsertDeltaTrend(inputDate);
+
+    res.json({
+      success: true,
+      message: `Delta trend computed and stored for ${inputDate}`
+    });
+  } catch (error) {
+    console.error("❌ Delta trend endpoint error:", error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
