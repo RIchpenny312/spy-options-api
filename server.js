@@ -172,59 +172,54 @@ app.get('/api/spy/market-tide/deltas/today', async (req, res) => {
 // 🔹 Combined Market Tide Snapshot
 app.get('/api/spy/market-tide/snapshot', async (req, res) => {
   try {
-    const [latestTide] = await fetchData(`
-      SELECT * FROM market_tide_data 
+    // Last 3 market tide intervals
+    const tide = await fetchData(`
+      SELECT *
+      FROM market_tide_data 
       WHERE date = CURRENT_DATE
       ORDER BY timestamp DESC 
-      LIMIT 1
+      LIMIT 3
     `);
-    const [rollingAvg] = await fetchData(`
-      SELECT * FROM market_tide_rolling_avg 
-      ORDER BY timestamp DESC 
-      LIMIT 1
-    `);
-    const [latestDelta] = await fetchData(`
-      SELECT * FROM market_tide_deltas 
+
+    // Last 3 delta trend intervals
+    const deltas = await fetchData(`
+      SELECT *
+      FROM market_tide_deltas 
       WHERE timestamp::date = CURRENT_DATE
+      ORDER BY timestamp DESC 
+      LIMIT 3
+    `);
+
+    // Rolling average snapshot (most recent)
+    const [rollingAvg] = await fetchData(`
+      SELECT * 
+      FROM market_tide_rolling_avg 
       ORDER BY timestamp DESC 
       LIMIT 1
     `);
 
-    if (!latestTide || !rollingAvg || !latestDelta) {
+    if (!tide || !deltas || !rollingAvg) {
       return res.status(404).json({ error: "Incomplete Market Tide snapshot" });
     }
 
     res.json({
-      latest_tide: latestTide,
-      rolling_avg: rollingAvg,
-      latest_delta: latestDelta
+      market_tide: {
+        last_3: tide.reverse(), // chronological order
+        rolling_avg: {
+          avg_net_call_premium_12: rollingAvg.avg_net_call_premium_12_intervals,
+          avg_net_put_premium_12: rollingAvg.avg_net_put_premium_12_intervals,
+          avg_net_volume_12: rollingAvg.avg_net_volume_12_intervals,
+          avg_net_call_premium_48: rollingAvg.avg_net_call_premium_48_intervals,
+          avg_net_put_premium_48: rollingAvg.avg_net_put_premium_48_intervals,
+          avg_net_volume_48: rollingAvg.avg_net_volume_48_intervals
+        }
+      },
+      market_tide_deltas: deltas.reverse() // chronological
     });
   } catch (error) {
     console.error("❌ Snapshot error:", error.message);
     res.status(500).json({ error: "Internal Server Error" });
   }
-});
-
-// 🔹 Fetch Bid/Ask Volume Data (Limited to 5)
-app.get('/api/spy/bid-ask-volume', async (req, res) => {
-    try {
-        const data = await fetchData(`
-            SELECT 
-                COALESCE(symbol, ticker) AS ticker,  -- Ensures ticker is not NULL
-                call_volume, put_volume, 
-                call_volume_ask_side, put_volume_ask_side, 
-                call_volume_bid_side, put_volume_bid_side, 
-                date
-            FROM bid_ask_volume_data
-            WHERE symbol IS NOT NULL OR ticker IS NOT NULL
-            ORDER BY date DESC
-            LIMIT 5
-        `);
-        res.json(data);
-    } catch (error) {
-        console.error("❌ Error fetching Bid/Ask Volume:", error.message);
-        res.status(500).json({ error: "Internal Server Error" });
-    }
 });
 
 // 🔹 Fetch Enhanced Bid/Ask Volume Data (Limited to 5)
