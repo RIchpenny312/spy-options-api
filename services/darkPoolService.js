@@ -3,6 +3,8 @@ const { Client } = require("pg");
 const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
+const { storeDarkPoolLevelsInDB } = require("./storeDarkPoolLevels"); // adjust path if needed
+
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
@@ -117,7 +119,39 @@ async function fetchAndStoreDarkPoolData() {
   }
 
   await client.end();
-  console.log(`✅ Inserted ${parsedTrades.length} dark pool trades.`);
+  console.log(`✅ Inserted ${parsedTrades.length} raw dark pool trades.`);
+
+  // --- Aggregate by price and insert summaries ---
+  const summaryMap = new Map();
+
+  for (const trade of parsedTrades) {
+    const key = trade.price.toFixed(2); // round price for grouping
+
+    if (!summaryMap.has(key)) {
+      summaryMap.set(key, {
+        trading_day: today,
+        price: trade.price,
+        total_premium: 0,
+        total_volume: 0,
+        total_size: 0,
+        trade_count: 0
+      });
+    }
+
+    const level = summaryMap.get(key);
+    level.total_premium += trade.premium || 0;
+    level.total_volume += trade.volume || 0;
+    level.total_size += trade.size || 0;
+    level.trade_count += 1;
+  }
+
+  const top_levels = Array.from(summaryMap.values());
+
+  if (top_levels.length > 0) {
+    await storeDarkPoolLevelsInDB({ trading_day: today, top_levels });
+  } else {
+    console.log("⚠️ No dark pool summary levels to insert.");
+  }
 }
 
 module.exports = {
