@@ -961,16 +961,16 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
   try {
     for (const item of data) {
       if (dteType === 0) {
-        // ✅ Clean insert for 0 DTE — now includes trading_day to match constraint
+        // ✅ Do NOT insert trading_day — it's generated from recorded_at
         await client.query(
           `INSERT INTO ${table} (
             symbol, date, expiry, dte,
             implied_move, implied_move_perc, volatility,
-            trading_day, bucket_time, recorded_at
+            bucket_time, recorded_at
           ) VALUES (
             $1, $2, $3, $4,
             $5, $6, $7,
-            $8, $9, NOW()
+            $8, NOW()
           )
           ON CONFLICT (trading_day, bucket_time)
           DO UPDATE SET 
@@ -986,12 +986,11 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
             item.implied_move,
             item.implied_move_perc,
             item.volatility,
-            item.trading_day,
             item.bucket_time
           ]
         );
       } else {
-        // ✅ Clean insert for 5 DTE
+        // ✅ 5 DTE — trading_day is not generated, so it's allowed
         await client.query(
           `INSERT INTO ${table} (
             ticker, date, expiry, dte,
