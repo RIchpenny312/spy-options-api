@@ -961,37 +961,36 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
   try {
     for (const item of data) {
       if (dteType === 0) {
-        // Insert for spy_iv_0dte (no ticker)
+        // 🧼 CLEAN insert for spy_iv_0dte — NO trading_day
         await client.query(
           `INSERT INTO ${table} (
             symbol, date, expiry, dte,
             implied_move, implied_move_perc, volatility,
-            trading_day, bucket_time, recorded_at
+            bucket_time, recorded_at
           ) VALUES (
             $1, $2, $3, $4,
             $5, $6, $7,
-            $8, $9, NOW()
+            $8, NOW()
           )
-          ON CONFLICT (trading_day, bucket_time)
+          ON CONFLICT (date, bucket_time)
           DO UPDATE SET 
             implied_move = EXCLUDED.implied_move,
             implied_move_perc = EXCLUDED.implied_move_perc,
             volatility = EXCLUDED.volatility,
             recorded_at = NOW();`,
           [
-            item.symbol || item.ticker, // fallback
+            item.symbol || item.ticker,
             item.date,
             item.expiry,
             item.dte,
             item.implied_move,
             item.implied_move_perc,
             item.volatility,
-            item.trading_day,
             item.bucket_time
           ]
         );
       } else {
-        // Insert for spy_iv_5dte (includes ticker)
+        // ✅ 5 DTE still includes trading_day and ticker
         await client.query(
           `INSERT INTO ${table} (
             ticker, date, expiry, dte,
