@@ -404,43 +404,42 @@ async function fetchBidAskVolumeData(ticker) {
 }
 
 // ✅ Function to fetch SPY IV for 0 DTE
-async function fetchSpyIV0DTE() {
-    try {
-        console.log("🔍 Fetching SPY Implied Volatility for 0 DTE...");
-        const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/volatility/term-structure");
+async function fetchSpyIVData() {
+  try {
+    console.log("🔍 Fetching SPY IV term structure...");
+    const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/volatility/term-structure");
 
-        // ✅ Log the response
-        console.log("Full API Response:", JSON.stringify(response.data, null, 2));
+    const now = dayjs().tz(TIMEZONE);
+    const trading_day = now.format("YYYY-MM-DD");
+    const bucket_time = normalizeToBucket(now.toISOString());
 
-        if (!response.data?.data || !Array.isArray(response.data.data)) {
-            throw new Error("Invalid SPY IV response format");
-        }
-
-        // ✅ Find `dte = 0`
-        const ivData = response.data.data.find(item => item.dte === 0);
-
-        if (!ivData) {
-            console.warn("⚠️ No IV data found for DTE = 0");
-            return [];
-        }
-
-        function safeParseFloat(value) {
-            return isNaN(parseFloat(value)) ? null : parseFloat(value);
-        }
-
-        return [{
-            ticker: ivData.ticker || "SPY",
-            date: ivData.date || null,
-            expiry: ivData.expiry || null,
-            dte: ivData.dte || 0,
-            implied_move: safeParseFloat(ivData.implied_move),
-            implied_move_perc: safeParseFloat(ivData.implied_move_perc),
-            volatility: safeParseFloat(ivData.volatility)
-        }];
-    } catch (error) {
-        console.error("❌ Error fetching SPY IV 0 DTE data:", error.message);
-        return [];
+    if (!response.data?.data || !Array.isArray(response.data.data)) {
+      throw new Error("Invalid SPY IV response format");
     }
+
+    const formatItem = (item) => ({
+      ticker: item.ticker || "SPY",
+      date: item.date || trading_day,
+      expiry: item.expiry,
+      dte: item.dte,
+      implied_move: parseFloat(item.implied_move) || null,
+      implied_move_perc: parseFloat(item.implied_move_perc) || null,
+      volatility: parseFloat(item.volatility) || null,
+      trading_day,
+      bucket_time,
+    });
+
+    const iv0 = response.data.data.find(i => i.dte === 0);
+    const iv5 = response.data.data.find(i => i.dte === 5);
+
+    return {
+      iv0: iv0 ? [formatItem(iv0)] : [],
+      iv5: iv5 ? [formatItem(iv5)] : [],
+    };
+  } catch (error) {
+    console.error("❌ Error fetching SPY IV term structure:", error.message);
+    return { iv0: [], iv5: [] };
+  }
 }
 
 // ✅ Fetch SPY and SPX Greek Exposure
@@ -953,63 +952,50 @@ async function storeBidShiftSignals(bidAskData) {
 }
 
 // ✅ Function to store SPY IV Data (0 DTE) in DB
-async function storeSpyIV0DTEDataInDB(data) {
-    if (!data.length) {
-        console.warn("⚠️ No SPY IV (0 DTE) data to insert.");
-        return;
+async function storeSpyIVDataInDB(data, dteType = 0) {
+  const table = dteType === 0 ? "spy_iv_0dte" : "spy_iv_5dte";
+
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  try {
+    for (const item of data) {
+      await client.query(
+        `INSERT INTO ${table} (
+          ticker, date, expiry, dte,
+          implied_move, implied_move_perc, volatility,
+          trading_day, bucket_time, recorded_at
+        ) VALUES (
+          $1, $2, $3, $4,
+          $5, $6, $7,
+          $8, $9, NOW()
+        )
+        ON CONFLICT (trading_day, bucket_time)
+        DO UPDATE SET 
+          implied_move = EXCLUDED.implied_move,
+          implied_move_perc = EXCLUDED.implied_move_perc,
+          volatility = EXCLUDED.volatility,
+          recorded_at = NOW();`,
+        [
+          item.ticker,
+          item.date,
+          item.expiry,
+          item.dte,
+          item.implied_move,
+          item.implied_move_perc,
+          item.volatility,
+          item.trading_day,
+          item.bucket_time
+        ]
+      );
     }
 
-    const client = new Client(DB_CONFIG);
-    await client.connect();
-
-    try {
-        console.log("✅ Inserting SPY IV (0 DTE) data into DB...");
-
-        function safeValue(val) {
-            return (val === undefined || val === null) ? null : val;
-        }
-
-        for (const item of data) {
-            console.log("📊 Inserting:", JSON.stringify(item, null, 2));
-
-            await client.query(
-                `INSERT INTO spy_iv_0dte (
-                    symbol, date, expiry, dte, implied_move, implied_move_perc, volatility, recorded_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, NOW()
-                )
-                ON CONFLICT (symbol, date, dte)
-                DO UPDATE SET 
-                    implied_move = COALESCE(EXCLUDED.implied_move, spy_iv_0dte.implied_move),
-                    implied_move_perc = COALESCE(EXCLUDED.implied_move_perc, spy_iv_0dte.implied_move_perc),
-                    volatility = COALESCE(EXCLUDED.volatility, spy_iv_0dte.volatility),
-                    recorded_at = NOW();`,
-                [
-                    safeValue(item.ticker),
-                    safeValue(item.date),
-                    safeValue(item.expiry),
-                    safeValue(item.dte),
-                    safeValue(item.implied_move),
-                    safeValue(item.implied_move_perc),
-                    safeValue(item.volatility)
-                ]
-            );
-        }
-
-        console.log("✅ SPY IV (0 DTE) Data inserted successfully.");
-
-        // Fetch latest SPY IV data for Custom GPT Analysis
-        const result = await client.query(
-            `SELECT * FROM spy_iv_0dte ORDER BY date DESC, recorded_at DESC LIMIT 5;`
-        );
-
-        console.log("📊 Last 5 SPY IV (0 DTE) Records for Custom GPT Analysis:", result.rows);
-
-    } catch (error) {
-        console.error("❌ Error inserting SPY IV (0 DTE) Data:", error.message);
-    } finally {
-        await client.end();
-    }
+    console.log(`✅ SPY IV ${dteType} DTE stored with time consistency.`);
+  } catch (err) {
+    console.error(`❌ Error storing SPY IV ${dteType} DTE:`, err.message);
+  } finally {
+    await client.end();
+  }
 }
 
 // ✅ Store SPY and SPX Greek Exposure Data in DB
@@ -1504,9 +1490,10 @@ async function main() {
       await storeDarkPoolLevelsInDB(topLevels);
     }
 	
-    console.log("📢 Calling fetchSpyIV0DTE...");
-    const spyIV0DTE = await fetchSpyIV0DTE();
-    console.log("✅ SPY IV 0 DTE Data Fetched:", spyIV0DTE);
+    console.log("📢 Fetching SPY IV (0 DTE and 5 DTE)...");
+    const { iv0, iv5 } = await fetchSpyIVData(); // uses new function
+    console.log("✅ SPY IV 0 DTE:", iv0);
+    console.log("✅ SPY IV 5 DTE:", iv5);
 
     // Fetch all datasets in parallel with error handling
     const [
@@ -1578,7 +1565,8 @@ async function main() {
       spotGexData?.length > 0 ? storeSpySpotGexInDB(spotGexData) : null,
       optionPriceLevelsData?.length > 0 ? storeSpyOptionPriceLevelsInDB(optionPriceLevelsData) : null,
       greeksByStrikeData?.length > 0 ? storeSpyGreeksByStrikeInDB(greeksByStrikeData) : null,
-      spyIV0DTE?.length > 0 ? storeSpyIV0DTEDataInDB(spyIV0DTE) : null,
+      iv0?.length > 0 ? storeSpyIVDataInDB(iv0, 0) : null,
+      iv5?.length > 0 ? storeSpyIVDataInDB(iv5, 5) : null,
       greekSpy?.length > 0 ? storeGreekExposureInDB(greekSpy) : null,
       greekSpx?.length > 0 ? storeGreekExposureInDB(greekSpx) : null,
       marketTideData?.length > 0 ? storeMarketTideDataInDB(marketTideData) : null,
@@ -1594,8 +1582,8 @@ async function main() {
     }
 
     // Fetch and Store Enhanced Bid Ask Volume
-    const spyPriceOpen = 523.12;  // Replace with OHLC open
-    const spyPriceClose = 525.65; // Replace with OHLC close
+    const spyPriceOpen = ohlcData?.[0]?.open || null;
+    const spyPriceClose = ohlcData?.[ohlcData.length - 1]?.close || null;
     const spxPriceOpen = 5263.44;
     const spxPriceClose = 5280.01;
     const qqqPriceOpen = 438.20;

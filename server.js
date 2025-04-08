@@ -311,23 +311,44 @@ app.get('/api/spy/spot-gex/average', async (req, res) => {
     }
 });
 
-// ✅ Fetch SPY IV Data from the Database (0 DTE)
-app.get("/api/spy/iv/0dte", async (req, res) => {
-    try {
-        const client = new Client(DB_CONFIG);
-        await client.connect();
+// ✅ Generalized SPY IV API: Supports 0 DTE, 5 DTE, future DTEs
+app.get("/api/spy/iv/:dte", async (req, res) => {
+  const dte = parseInt(req.params.dte);
+  const date = req.query.date || new Date().toISOString().split("T")[0];
 
-        const result = await client.query(
-            `SELECT * FROM spy_iv_0dte WHERE dte = 0 ORDER BY date DESC, recorded_at DESC LIMIT 5;`
-        );
+  const tableMap = {
+    0: "spy_iv_0dte",
+    5: "spy_iv_5dte"
+  };
 
-        await client.end();
+  const table = tableMap[dte];
+  if (!table) {
+    return res.status(400).json({ error: "Invalid DTE. Supported values: 0, 5" });
+  }
 
-        res.json({ latest: result.rows[0] || null, last_5: result.rows });
-    } catch (error) {
-        console.error("❌ Error fetching SPY IV 0 DTE from DB:", error.message);
-        res.status(500).json({ error: "Internal Server Error" });
-    }
+  try {
+    const client = new Client(DB_CONFIG);
+    await client.connect();
+
+    const result = await client.query(
+      `SELECT *
+       FROM ${table}
+       WHERE trading_day = $1
+       ORDER BY bucket_time DESC
+       LIMIT 5`,
+      [date]
+    );
+
+    await client.end();
+
+    res.json({
+      latest: result.rows[0] || null,
+      last_5: result.rows
+    });
+  } catch (error) {
+    console.error(`❌ Error fetching SPY IV ${dte} DTE:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // ✅ Fetch SPY Intraday Summary
