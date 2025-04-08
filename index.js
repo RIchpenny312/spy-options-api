@@ -951,7 +951,7 @@ async function storeBidShiftSignals(bidAskData) {
   }
 }
 
-// ✅ Function to store SPY IV Data (0 DTE) in DB
+// ✅ Function to store SPY IV Data (0 or 5 DTE) in DB
 async function storeSpyIVDataInDB(data, dteType = 0) {
   const table = dteType === 0 ? "spy_iv_0dte" : "spy_iv_5dte";
 
@@ -960,34 +960,67 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
 
   try {
     for (const item of data) {
-      await client.query(
-        `INSERT INTO ${table} (
-          ticker, date, expiry, dte,
-          implied_move, implied_move_perc, volatility,
-          trading_day, bucket_time, recorded_at
-        ) VALUES (
-          $1, $2, $3, $4,
-          $5, $6, $7,
-          $8, $9, NOW()
-        )
-        ON CONFLICT (trading_day, bucket_time)
-        DO UPDATE SET 
-          implied_move = EXCLUDED.implied_move,
-          implied_move_perc = EXCLUDED.implied_move_perc,
-          volatility = EXCLUDED.volatility,
-          recorded_at = NOW();`,
-        [
-          item.ticker,
-          item.date,
-          item.expiry,
-          item.dte,
-          item.implied_move,
-          item.implied_move_perc,
-          item.volatility,
-          item.trading_day,
-          item.bucket_time
-        ]
-      );
+      if (dteType === 0) {
+        // Insert for spy_iv_0dte (no ticker)
+        await client.query(
+          `INSERT INTO ${table} (
+            symbol, date, expiry, dte,
+            implied_move, implied_move_perc, volatility,
+            trading_day, bucket_time, recorded_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7,
+            $8, $9, NOW()
+          )
+          ON CONFLICT (trading_day, bucket_time)
+          DO UPDATE SET 
+            implied_move = EXCLUDED.implied_move,
+            implied_move_perc = EXCLUDED.implied_move_perc,
+            volatility = EXCLUDED.volatility,
+            recorded_at = NOW();`,
+          [
+            item.symbol || item.ticker, // fallback
+            item.date,
+            item.expiry,
+            item.dte,
+            item.implied_move,
+            item.implied_move_perc,
+            item.volatility,
+            item.trading_day,
+            item.bucket_time
+          ]
+        );
+      } else {
+        // Insert for spy_iv_5dte (includes ticker)
+        await client.query(
+          `INSERT INTO ${table} (
+            ticker, date, expiry, dte,
+            implied_move, implied_move_perc, volatility,
+            trading_day, bucket_time, recorded_at
+          ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7,
+            $8, $9, NOW()
+          )
+          ON CONFLICT (trading_day, bucket_time)
+          DO UPDATE SET 
+            implied_move = EXCLUDED.implied_move,
+            implied_move_perc = EXCLUDED.implied_move_perc,
+            volatility = EXCLUDED.volatility,
+            recorded_at = NOW();`,
+          [
+            item.ticker,
+            item.date,
+            item.expiry,
+            item.dte,
+            item.implied_move,
+            item.implied_move_perc,
+            item.volatility,
+            item.trading_day,
+            item.bucket_time
+          ]
+        );
+      }
     }
 
     console.log(`✅ SPY IV ${dteType} DTE stored with time consistency.`);
