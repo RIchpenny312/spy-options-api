@@ -954,14 +954,14 @@ async function storeBidShiftSignals(bidAskData) {
 // ✅ Function to store SPY IV Data (0 or 5 DTE) in DB
 async function storeSpyIVDataInDB(data, dteType = 0) {
   const table = dteType === 0 ? "spy_iv_0dte" : "spy_iv_5dte";
-
   const client = new Client(DB_CONFIG);
   await client.connect();
 
   try {
+    const today = dayjs().tz(TIMEZONE).format("YYYY-MM-DD");
+
     for (const item of data) {
       if (dteType === 0) {
-        // ✅ Do NOT insert trading_day — it's generated from recorded_at
         await client.query(
           `INSERT INTO ${table} (
             symbol, date, expiry, dte,
@@ -972,7 +972,7 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
             $5, $6, $7,
             $8, NOW()
           )
-          ON CONFLICT (trading_day, bucket_time)
+          ON CONFLICT (symbol, date, dte, bucket_time)
           DO UPDATE SET 
             implied_move = EXCLUDED.implied_move,
             implied_move_perc = EXCLUDED.implied_move_perc,
@@ -980,7 +980,7 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
             recorded_at = NOW();`,
           [
             item.symbol || item.ticker,
-            item.date,
+            item.date || today,
             item.expiry,
             item.dte,
             item.implied_move,
@@ -990,7 +990,8 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
           ]
         );
       } else {
-        // ✅ 5 DTE — trading_day is not generated, so it's allowed
+        const trading_day = item.trading_day || dayjs(item.bucket_time).tz(TIMEZONE).format("YYYY-MM-DD");
+
         await client.query(
           `INSERT INTO ${table} (
             ticker, date, expiry, dte,
@@ -1001,7 +1002,7 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
             $5, $6, $7,
             $8, $9, NOW()
           )
-          ON CONFLICT (trading_day, bucket_time)
+          ON CONFLICT (ticker, date, dte, bucket_time)
           DO UPDATE SET 
             implied_move = EXCLUDED.implied_move,
             implied_move_perc = EXCLUDED.implied_move_perc,
@@ -1009,13 +1010,13 @@ async function storeSpyIVDataInDB(data, dteType = 0) {
             recorded_at = NOW();`,
           [
             item.ticker,
-            item.date,
+            item.date || trading_day,
             item.expiry,
             item.dte,
             item.implied_move,
             item.implied_move_perc,
             item.volatility,
-            item.trading_day,
+            trading_day,
             item.bucket_time
           ]
         );
