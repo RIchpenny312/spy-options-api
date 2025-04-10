@@ -4,6 +4,8 @@ const timezone = require("dayjs/plugin/timezone");
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+const { classifyDeltaTrend, suggestLabelExplanation } = require('./deltaTrendClassifier');
+
 const TIMEZONE = process.env.TIMEZONE || "America/Chicago";
 
 // Normalize timestamp to 5-minute Chicago-local bucket
@@ -41,32 +43,14 @@ function getDeltaChangeRates(call, put, vol, prevCall = 0, prevPut = 0, prevVol 
   };
 }
 
-function detectPutClosingBounce({ delta_put, delta_put_pct_change, net_put_premium, delta_volume }) {
-  return (
-    net_put_premium < 0 &&
-    delta_put < 0 &&
-    delta_put_pct_change > -15 &&
-    delta_volume >= 0
-  );
-}
-
-function detectCallClosingBearish({ delta_call, delta_call_pct_change, net_call_premium, delta_volume }) {
-  return (
-    net_call_premium < 0 &&
-    delta_call < 0 &&
-    delta_call_pct_change > -15 &&
-    delta_volume <= 0
-  );
-}
-
-function evaluateSignalStrength(signalType, delta_pct_change, delta_volume) {
-  if (signalType === "bounce") {
-    return delta_pct_change > 0 && delta_volume > 0 ? "Strong Bounce Risk" : "Moderate Bounce Risk";
+function correlateWithMarketTide(net_call_premium, net_put_premium, delta_call, delta_put) {
+  if (delta_call > delta_put && net_call_premium > net_put_premium) {
+    return "Bullish Alignment";
   }
-  if (signalType === "bearish") {
-    return delta_pct_change > 0 && delta_volume < 0 ? "Strong Bearish Signal" : "Moderate Bearish Signal";
+  if (delta_put > delta_call && net_put_premium > net_call_premium) {
+    return "Bearish Alignment";
   }
-  return null;
+  return "Neutral Alignment";
 }
 
 async function processAndInsertDeltaTrend(client, inputDate = null) {
@@ -109,37 +93,35 @@ async function processAndInsertDeltaTrend(client, inputDate = null) {
       delta_volume_pct_change = 0,
     } = getDeltaChangeRates(delta_call, delta_put, delta_volume, previous_call, previous_put, previous_volume);
 
-    // ✅ FIX: Define bucketTimeIso first
     const bucketTimeIso = normalizeToBucket(latest.timestamp);
     const bucketTime = dayjs(bucketTimeIso).tz(TIMEZONE).toDate();
     const bucketTimeFormatted = dayjs(bucketTimeIso).format("YYYY-MM-DD HH:mm:ss");
 
     console.log(`🕒 Normalized Bucket Time: ${bucketTimeFormatted}`);
 
-    const sentiment =
-      delta_call === delta_put ? "Neutral" : delta_call > delta_put ? "Bullish" : "Bearish";
+    // Refined sentiment logic
+    const sentiment = Math.abs(delta_call - delta_put) < 500_000
+      ? "Neutral"
+      : delta_call > delta_put
+      ? "Bullish"
+      : "Bearish";
 
-    const bounceSignal = detectPutClosingBounce({
-      delta_put,
-      delta_put_pct_change,
-      net_put_premium: safeNumber(latest.net_put_premium),
-      delta_volume,
-    });
-
-    const bearishSignal = detectCallClosingBearish({
+    // New classifier logic
+    const flow_direction = classifyDeltaTrend(
       delta_call,
+      delta_put,
       delta_call_pct_change,
-      net_call_premium: safeNumber(latest.net_call_premium),
-      delta_volume,
-    });
+      delta_put_pct_change
+    );
 
-    const bounceSignalStrength = bounceSignal
-      ? evaluateSignalStrength("bounce", delta_put_pct_change, delta_volume)
-      : null;
+    const alignment_label = correlateWithMarketTide(
+      safeNumber(latest.net_call_premium),
+      safeNumber(latest.net_put_premium),
+      delta_call,
+      delta_put
+    );
 
-    const bearishSignalStrength = bearishSignal
-      ? evaluateSignalStrength("bearish", delta_call_pct_change, delta_volume)
-      : null;
+    const ai_explanation = suggestLabelExplanation(flow_direction, alignment_label);
 
     const recordedAt = dayjs().toISOString();
 
@@ -150,66 +132,74 @@ async function processAndInsertDeltaTrend(client, inputDate = null) {
       delta_call_pct_change,
       delta_put_pct_change,
       delta_volume_pct_change,
-      bounceSignal,
-      bearishSignal,
+      flow_direction,
+      alignment_label,
+      ai_explanation,
     });
 
-await client.query(`
-  INSERT INTO market_tide_deltas (
-    timestamp,
-    bucket_time,
-    delta_call,
-    delta_put,
-    delta_volume,
-    sentiment,
-    delta_call_pct_change,
-    delta_put_pct_change,
-    delta_volume_pct_change,
-    bounce_signal,
-    bounce_signal_strength,
-    bearish_signal,
-    bearish_signal_strength,
-    recorded_at
-  )
-  VALUES (
-    $1,
-    $2,
-    $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11,
-    $12, $13,
-    $14
-  )
-  ON CONFLICT (bucket_time) DO UPDATE
-  SET
-    delta_call               = $3,
-    delta_put                = $4,
-    delta_volume             = $5,
-    sentiment                = $6,
-    delta_call_pct_change    = $7,
-    delta_put_pct_change     = $8,
-    delta_volume_pct_change  = $9,
-    bounce_signal            = $10,
-    bounce_signal_strength   = $11,
-    bearish_signal           = $12,
-    bearish_signal_strength  = $13,
-    recorded_at              = $14
-`, [
-  latest.timestamp,
-  bucketTime,
-  delta_call,
-  delta_put,
-  delta_volume,
-  sentiment,
-  delta_call_pct_change,
-  delta_put_pct_change,
-  delta_volume_pct_change,
-  bounceSignal,
-  bounceSignalStrength,
-  bearishSignal,
-  bearishSignalStrength,
-  recordedAt,
-]);
+    // Optional: Add GPT-friendly debug log
+    console.log(`[GPT] ${bucketTimeFormatted} | ${flow_direction} | ${alignment_label} → ${ai_explanation}`);
+
+    // Optional: Add enhanced GPT-friendly debug log
+    console.log(`[AI_LABEL]
+      🕒 ${bucketTimeFormatted}
+      Flow: ${flow_direction}
+      Alignment: ${alignment_label}
+      Explanation: ${ai_explanation}
+    [/AI_LABEL]`);
+
+    await client.query(`
+      INSERT INTO market_tide_deltas (
+        timestamp,
+        bucket_time,
+        delta_call,
+        delta_put,
+        delta_volume,
+        sentiment,
+        delta_call_pct_change,
+        delta_put_pct_change,
+        delta_volume_pct_change,
+        flow_direction,
+        alignment_label,
+        ai_explanation,
+        recorded_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3, $4, $5, $6,
+        $7, $8, $9,
+        $10, $11, $12,
+        $13
+      )
+      ON CONFLICT (bucket_time) DO UPDATE
+      SET
+        delta_call               = $3,
+        delta_put                = $4,
+        delta_volume             = $5,
+        sentiment                = $6,
+        delta_call_pct_change    = $7,
+        delta_put_pct_change     = $8,
+        delta_volume_pct_change  = $9,
+        flow_direction           = $10,
+        alignment_label          = $11,
+        ai_explanation           = $12,
+        recorded_at              = $13
+    `, [
+      latest.timestamp,
+      bucketTime,
+      delta_call,
+      delta_put,
+      delta_volume,
+      sentiment,
+      delta_call_pct_change,
+      delta_put_pct_change,
+      delta_volume_pct_change,
+      flow_direction,
+      alignment_label,
+      ai_explanation,
+      recordedAt,
+    ]);
 
     console.log(`[Delta] ${bucketTimeIso} (${tradingDay}) → call: ${delta_call}, put: ${delta_put}, vol: ${delta_volume}, sentiment: ${sentiment}`);
     console.log(`[Pct] Δcall: ${delta_call_pct_change.toFixed(2)}%, Δput: ${delta_put_pct_change.toFixed(2)}%, Δvol: ${delta_volume_pct_change.toFixed(2)}%`);
