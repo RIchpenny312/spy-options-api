@@ -1,16 +1,21 @@
 require("dotenv").config();
 console.log("✅ Loaded TIMEZONE:", process.env.TIMEZONE);
+
 const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
+
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
 const { fetchAndStoreDarkPoolData } = require('./services/darkPoolService');
 const { getTopDarkPoolLevels } = require('./services/darkPoolLevelsService');
 const { storeDarkPoolLevelsInDB } = require('./services/storeDarkPoolLevels');
 const { processAndInsertDeltaTrend } = require('./services/deltaTrendService');
+const { normalizeToBucket } = require('./utils/time');
+const { US_MARKET_HOURS } = require('./config/marketHours');
 
 let TIMEZONE = process.env.TIMEZONE || 'America/Chicago';
 
@@ -39,12 +44,6 @@ const DB_CONFIG = {
 
 // ✅ Timestamp normalization helper
 const BUCKET_INTERVAL_MINUTES = 5;
-
-function normalizeToBucket(timestampUtc) {
-  const local = dayjs.utc(timestampUtc).tz(TIMEZONE);
-  const floored = Math.floor(local.minute() / BUCKET_INTERVAL_MINUTES) * BUCKET_INTERVAL_MINUTES;
-  return local.minute(floored).second(0).millisecond(0).format(); // returns ISO string
-}
 
 // ✅ Function to handle API Rate Limits (Retry on 429 Errors)
 async function fetchWithRetry(url, retries = 3, delay = 5000) {
@@ -109,7 +108,7 @@ async function fetchSpyOhlcData() {
       volume: parseInt(item.volume) || 0,
       start_time: dayjs.utc(item.start_time).tz(TIMEZONE).toISOString(),
       end_time: dayjs.utc(item.end_time).tz(TIMEZONE).toISOString(),
-      bucket_time: normalizeToBucket(item.start_time) // this already handles TZ conversion
+      bucket_time: normalizeToBucket(item.start_time) // Ensure 5-minute alignment
     }));
   } catch (error) {
     console.error("❌ Error fetching OHLC data:", error.message);
@@ -135,39 +134,40 @@ async function fetchPriceStructureIfExists(date) {
 
 // ✅ Function to fetch SPY SPOT GEX
 async function fetchSpySpotGex() {
-    try {
-        console.log("🔍 Fetching SPOT GEX...");
-        const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/spot-exposures");
+  try {
+    console.log("🔍 Fetching SPOT GEX...");
+    const response = await fetchWithRetry("https://api.unusualwhales.com/api/stock/SPY/spot-exposures");
 
-        // Debugging: Log API response
-        console.log("SPY Spot GEX API Response:", response.data);
+    // Debugging: Log API response
+    console.log("SPY Spot GEX API Response:", response.data);
 
-        if (!response.data?.data || !Array.isArray(response.data.data) || response.data.data.length === 0) {
-            throw new Error("Invalid or empty SPOT GEX response format");
-        }
-
-        // ✅ Extract the most recent record
-        const latestData = response.data.data.sort((a, b) => new Date(b.time) - new Date(a.time))[0];
-
-        if (!latestData?.time || !latestData?.price) {
-            console.error("❌ Missing critical Spot GEX fields in API response", latestData);
-            return [];
-        }
-
-        return [{
-            symbol: "SPY",
-            date: latestData.time.split("T")[0], // Extract YYYY-MM-DD
-            price: parseFloat(latestData.price) || 0,
-            charm_oi: parseFloat(latestData.charm_per_one_percent_move_oi) || 0,
-            gamma_oi: parseFloat(latestData.gamma_per_one_percent_move_oi) || 0,
-            vanna_oi: parseFloat(latestData.vanna_per_one_percent_move_oi) || 0,
-            time: latestData.time,
-            ticker: latestData.ticker || "SPY"
-        }];
-    } catch (error) {
-        console.error('❌ Error fetching SPY SPOT GEX:', error.message);
-        return [];
+    if (!response.data?.data || !Array.isArray(response.data.data) || response.data.data.length === 0) {
+      throw new Error("Invalid or empty SPOT GEX response format");
     }
+
+    // ✅ Extract the most recent record
+    const latestData = response.data.data.sort((a, b) => new Date(b.time) - new Date(a.time))[0];
+
+    if (!latestData?.time || !latestData?.price) {
+      console.error("❌ Missing critical Spot GEX fields in API response", latestData);
+      return [];
+    }
+
+    return [{
+      symbol: "SPY",
+      date: latestData.time.split("T")[0], // Extract YYYY-MM-DD
+      price: parseFloat(latestData.price) || 0,
+      charm_oi: parseFloat(latestData.charm_per_one_percent_move_oi) || 0,
+      gamma_oi: parseFloat(latestData.gamma_per_one_percent_move_oi) || 0,
+      vanna_oi: parseFloat(latestData.vanna_per_one_percent_move_oi) || 0,
+      time: latestData.time,
+      ticker: latestData.ticker || "SPY",
+      bucket_time: normalizeToBucket(latestData.time) // Normalize to 5-minute intervals
+    }];
+  } catch (error) {
+    console.error('❌ Error fetching SPY SPOT GEX:', error.message);
+    return [];
+  }
 }
 
 // ✅ Function to fetch SPY Greeks by Strike (Top 5 Call GEX & Top 5 Put GEX)
@@ -496,79 +496,81 @@ async function storeSpyOhlcDataInDB(data) {
   await client.connect();
 
   try {
-    console.log("✅ Inserting SPY OHLC data into DB...");
+    console.log("✅ Inserting SPY OHLC data into DB (bulk insert)...");
 
-    for (const item of data) {
-      await client.query(
-        `INSERT INTO spy_ohlc (
-          open, high, low, close, total_volume, volume, 
-          start_time, end_time, bucket_time, recorded_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, 
-          $7, $8, $9, NOW()
-        )
-        ON CONFLICT (bucket_time, start_time) DO UPDATE SET 
-          open = EXCLUDED.open, 
-          high = EXCLUDED.high, 
-          low = EXCLUDED.low, 
-          close = EXCLUDED.close, 
-          total_volume = EXCLUDED.total_volume, 
-          volume = EXCLUDED.volume,
-          recorded_at = NOW();`,
-        [
-          item.open,
-          item.high,
-          item.low,
-          item.close,
-          item.total_volume,
-          item.volume,
-          item.start_time,
-          item.end_time,
-          item.bucket_time // ✅ new field
-        ]
-      );
-    }
+    // Generate placeholders for bulk insert
+    const values = data.flatMap((item) => [
+      item.open,
+      item.high,
+      item.low,
+      item.close,
+      item.total_volume,
+      item.volume,
+      item.start_time,
+      item.end_time,
+      item.bucket_time
+    ]);
 
-    console.log("✅ SPY OHLC Data inserted successfully.");
-    await fetchAndStoreSpyOhlcAverages(client);
+    const placeholders = data
+      .map((_, i) => `($${i * 9 + 1}, $${i * 9 + 2}, $${i * 9 + 3}, $${i * 9 + 4}, $${i * 9 + 5}, $${i * 9 + 6}, $${i * 9 + 7}, $${i * 9 + 8}, $${i * 9 + 9}, NOW())`)
+      .join(", ");
 
+    const query = `
+      INSERT INTO spy_ohlc (
+        open, high, low, close, total_volume, volume, 
+        start_time, end_time, bucket_time, recorded_at
+      ) VALUES ${placeholders}
+      ON CONFLICT (bucket_time, start_time) DO UPDATE SET
+        open = EXCLUDED.open,
+        high = EXCLUDED.high,
+        low = EXCLUDED.low,
+        close = EXCLUDED.close,
+        total_volume = EXCLUDED.total_volume,
+        volume = EXCLUDED.volume,
+        recorded_at = NOW();
+    `;
+
+    await client.query(query, values);
+
+    console.log("✅ SPY OHLC Data inserted successfully (bulk).");
   } catch (error) {
-    console.error("❌ Error inserting SPY OHLC data:", error.message);
+    console.error("❌ Error inserting SPY OHLC data (bulk):", error.message);
   } finally {
     await client.end();
   }
 }
 
-// Store SPY SPOT GEX Data in DB
+// ✅ Store SPY SPOT GEX Data in DB
 async function storeSpySpotGexInDB(data) {
-    const client = new Client(DB_CONFIG);
-    await client.connect();
-    try {
-        for (const item of data) {
-            if (!item.time || item.price === 0) {
-                console.warn("⚠️ Skipping invalid SPOT GEX entry:", item);
-                continue;
-            }
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+  try {
+    for (const item of data) {
+      if (!item.time || item.price === 0) {
+        console.warn("⚠️ Skipping invalid SPOT GEX entry:", item);
+        continue;
+      }
 
-            await client.query(
-                `INSERT INTO spy_spot_gex (symbol, date, price, charm_oi, gamma_oi, vanna_oi, time, ticker, recorded_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-                 ON CONFLICT (symbol, time) 
-                 DO UPDATE SET 
-                     price = EXCLUDED.price,
-                     charm_oi = EXCLUDED.charm_oi,
-                     gamma_oi = EXCLUDED.gamma_oi,
-                     vanna_oi = EXCLUDED.vanna_oi,
-                     recorded_at = NOW();`,
-                [item.symbol, item.date, item.price, item.charm_oi, item.gamma_oi, item.vanna_oi, item.time, item.ticker]
-            );
-        }
-        console.log('✅ SPY SPOT GEX Data inserted successfully');
-    } catch (error) {
-        console.error('❌ Error inserting SPY SPOT GEX:', error.message);
-    } finally {
-        await client.end();
+      await client.query(
+        `INSERT INTO spy_spot_gex (symbol, date, price, charm_oi, gamma_oi, vanna_oi, time, ticker, bucket_time, recorded_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         ON CONFLICT (symbol, time) 
+         DO UPDATE SET 
+             price = EXCLUDED.price,
+             charm_oi = EXCLUDED.charm_oi,
+             gamma_oi = EXCLUDED.gamma_oi,
+             vanna_oi = EXCLUDED.vanna_oi,
+             bucket_time = EXCLUDED.bucket_time,
+             recorded_at = NOW();`,
+        [item.symbol, item.date, item.price, item.charm_oi, item.gamma_oi, item.vanna_oi, item.time, item.ticker, item.bucket_time]
+      );
     }
+    console.log('✅ SPY SPOT GEX Data inserted successfully');
+  } catch (error) {
+    console.error('❌ Error inserting SPY SPOT GEX:', error.message);
+  } finally {
+    await client.end();
+  }
 }
 
 // Store SPY Option Price Levels Data in DB

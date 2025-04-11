@@ -1,7 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const { Client } = require('pg');
-const { getTimeContext } = require('./utils/time');
+const { getTimeContext, normalizeToBucket } = require('./utils/time');
+const { US_MARKET_HOURS } = require('./config/marketHours');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,7 +10,6 @@ const { ensureSpyPartitionForDate } = require('./db/partitionHelpers');
 const { getTopDarkPoolLevels } = require('./services/darkPoolLevelsService');
 const { processAndInsertDeltaTrend } = require("./services/deltaTrendService");
 const dayjs = require("dayjs");
-
 
 // ✅ PostgreSQL Connection Config
 const DB_CONFIG = {
@@ -73,23 +73,37 @@ async function getMarketTideSnapshot() {
 app.get('/api/spy/ohlc', async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split("T")[0];
+    const startTime = req.query.start_time || '00:00:00';
+    const endTime = req.query.end_time || '23:59:59';
+    const limit = parseInt(req.query.limit) || null;
+    const sort = req.query.sort === 'desc' ? 'DESC' : 'ASC';
 
-    // ✅ Ensure partition exists before querying
     await ensureSpyPartitionForDate(date);
 
-    const data = await fetchData(`
+    const query = `
       SELECT *
-      FROM spy_ohlc 
-      WHERE start_time::date = $1
-      ORDER BY start_time ASC
-    `, [date]);
+      FROM spy_ohlc
+      WHERE bucket_time::date = $1
+        AND bucket_time::time BETWEEN $2 AND $3
+      ORDER BY bucket_time ${sort}
+      ${limit ? `LIMIT ${limit}` : ''};
+    `;
+
+    let data = await fetchData(query, [date, startTime, endTime]);
 
     if (!data || data.length === 0) {
       return res.status(404).json({ error: `No SPY OHLC data found for ${date}` });
     }
 
-    res.json(data);
+    // Convert timestamps to CT-aware ISO strings
+    data = data.map(row => ({
+      ...row,
+      start_time: new Date(row.start_time).toLocaleString("sv-SE", { timeZone: "America/Chicago" }),
+      end_time: new Date(row.end_time).toLocaleString("sv-SE", { timeZone: "America/Chicago" }),
+      bucket_time: normalizeToBucket(row.bucket_time) // Normalize bucket_time
+    }));
 
+    res.json(data);
   } catch (error) {
     console.error(`❌ Error fetching SPY OHLC data:`, error.message);
     res.status(500).json({ error: "Internal Server Error" });
@@ -98,28 +112,28 @@ app.get('/api/spy/ohlc', async (req, res) => {
 
 // 🔹 SPY OHLC Daily 
 app.get('/api/spy/ohlc/daily', async (req, res) => {
-  const date = req.query.date;
-  const data = await fetchData(`
-    SELECT * FROM spy_ohlc
-    WHERE start_time::date = $1
-      AND start_time::time BETWEEN '14:30:00' AND '21:00:00'
-    ORDER BY start_time;
-  `, [date]);
+  try {
+    const date = req.query.date;
 
-  res.json(data);
-});
+    const query = `
+      SELECT *
+      FROM spy_ohlc
+      WHERE bucket_time::date = $1
+        AND bucket_time::time BETWEEN '08:30:00' AND '15:00:00'
+      ORDER BY bucket_time;
+    `;
 
-// 🔹 Fetch SPY Spot GEX (Latest)
-app.get('/api/spy/spot-gex', async (req, res) => {
-    const data = await fetchData(`
-        SELECT * FROM spy_spot_gex 
-        ORDER BY time DESC 
-        LIMIT 1
-    `);
-    if (data.length === 0) {
-        return res.status(404).json({ error: "No Spot GEX data available" });
+    const data = await fetchData(query, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY OHLC data found for ${date}` });
     }
-    res.json(data[0]);
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching SPY OHLC daily data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // ✅ Fetch Last 10 Market Tide Entries
@@ -621,6 +635,35 @@ app.get('/api/spy/delta-trend/:date?', async (req, res) => {
   } catch (error) {
     console.error("❌ Delta trend endpoint error:", error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 🔹 Fetch SPY OHLC Historical Data
+app.get('/api/spy/ohlc/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+    const limit = parseInt(req.query.limit) || null;
+    const sort = req.query.sort === 'desc' ? 'DESC' : 'ASC';
+
+    const query = `
+      SELECT *
+      FROM spy_ohlc
+      WHERE bucket_time::date BETWEEN $1 AND $2
+      ORDER BY bucket_time ${sort}
+      ${limit ? `LIMIT ${limit}` : ''};
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY OHLC data found between ${startDate} and ${endDate}` });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching historical SPY OHLC data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
