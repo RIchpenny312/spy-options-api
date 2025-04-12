@@ -4,6 +4,7 @@
     "dayjs": "^1.11.13",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "moment-timezone": "^0.5.48",
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
     "pg": "^8.14.1"

@@ -1,16 +1,20 @@
+// -----------------------------------------------
+// Imports & Timezone Setup
+// -----------------------------------------------
 const axios = require("axios");
 const { Client } = require("pg");
 const dayjs = require("dayjs");
 const utc = require("dayjs/plugin/utc");
 const timezone = require("dayjs/plugin/timezone");
-const { storeDarkPoolLevelsInDB } = require("./storeDarkPoolLevels"); // adjust path if needed
-
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const TIMEZONE = process.env.TIMEZONE || "America/Chicago";
 dayjs.tz.setDefault(TIMEZONE);
 
+// -----------------------------------------------
+// Config: PostgreSQL Connection
+// -----------------------------------------------
 const DB_CONFIG = {
   host: process.env.DB_HOST,
   port: process.env.DB_PORT,
@@ -22,12 +26,18 @@ const DB_CONFIG = {
 
 const BUCKET_INTERVAL_MINUTES = 5;
 
-function normalizeToBucket(timestampUtc) {
-  const local = dayjs.utc(timestampUtc).tz(TIMEZONE);
-  const floored = Math.floor(local.minute() / BUCKET_INTERVAL_MINUTES) * BUCKET_INTERVAL_MINUTES;
+// -----------------------------------------------
+// Utility: Normalize Time to 5-Minute Bucket
+// -----------------------------------------------
+function normalizeToBucket(timestampUtc, bucketSize = BUCKET_INTERVAL_MINUTES, timezone = TIMEZONE) {
+  const local = dayjs.utc(timestampUtc).tz(timezone);
+  const floored = Math.floor(local.minute() / bucketSize) * bucketSize;
   return local.minute(floored).second(0).millisecond(0).toISOString();
 }
 
+// -----------------------------------------------
+// Utility: Fetch with Retry Logic
+// -----------------------------------------------
 async function fetchWithRetry(url, retries = 3, delay = 5000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -48,6 +58,9 @@ async function fetchWithRetry(url, retries = 3, delay = 5000) {
   }
 }
 
+// -----------------------------------------------
+// Main Function: Fetch and Store Today's Dark Pool Data
+// -----------------------------------------------
 async function fetchAndStoreDarkPoolData() {
   console.log("🔍 Fetching Dark Pool Trades...");
 
@@ -55,9 +68,15 @@ async function fetchAndStoreDarkPoolData() {
   const rawTrades = response.data?.data || [];
 
   const today = dayjs().tz(TIMEZONE).format("YYYY-MM-DD");
+  const marketOpen = dayjs.tz(`${today} 08:30:00`, TIMEZONE);
+  const marketClose = dayjs.tz(`${today} 15:00:00`, TIMEZONE);
+
+  // Filter trades to ensure they fall within market hours
   const todayTrades = rawTrades.filter(trade => {
-    const tradeDate = dayjs.utc(trade.executed_at).tz(TIMEZONE).format("YYYY-MM-DD");
-    return tradeDate === today;
+    const executed = dayjs.utc(trade.executed_at).tz(TIMEZONE);
+    return executed.isSame(today, 'day') &&
+           executed.isAfter(marketOpen) &&
+           executed.isBefore(marketClose);
   });
 
   if (todayTrades.length === 0) {
@@ -82,21 +101,25 @@ async function fetchAndStoreDarkPoolData() {
       nbbo_ask: parseFloat(trade.nbbo_ask),
       bid_quantity: parseInt(trade.nbbo_bid_quantity),
       ask_quantity: parseInt(trade.nbbo_ask_quantity),
-      market_center: trade.market_center
+      market_center: trade.market_center,
+      trade_day: executedLocal.format("YYYY-MM-DD") // Added trade_day for efficient filtering
     };
   });
 
   const client = new Client(DB_CONFIG);
   await client.connect();
 
-  for (const trade of parsedTrades) {
-    try {
+  try {
+    // Begin transaction for batch inserts
+    await client.query("BEGIN");
+
+    for (const trade of parsedTrades) {
       await client.query(`
         INSERT INTO spy_dark_pool (
           tracking_id, ticker, price, size, premium, volume,
           executed_at, bucket_time, nbbo_bid, nbbo_ask,
-          bid_quantity, ask_quantity, market_center
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          bid_quantity, ask_quantity, market_center, trade_day
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         ON CONFLICT (tracking_id) DO NOTHING
       `, [
         trade.tracking_id,
@@ -111,49 +134,25 @@ async function fetchAndStoreDarkPoolData() {
         trade.nbbo_ask,
         trade.bid_quantity,
         trade.ask_quantity,
-        trade.market_center
+        trade.market_center,
+        trade.trade_day
       ]);
-    } catch (err) {
-      console.warn(`⚠️ Insert failed for ID ${trade.tracking_id}:`, err.message);
-    }
-  }
-
-  await client.end();
-  console.log(`✅ Inserted ${parsedTrades.length} raw dark pool trades.`);
-
-  // --- Aggregate by price and insert summaries ---
-  const summaryMap = new Map();
-
-  for (const trade of parsedTrades) {
-    const key = trade.price.toFixed(2); // round price for grouping
-
-    if (!summaryMap.has(key)) {
-      summaryMap.set(key, {
-        trading_day: today,
-        price: trade.price,
-        total_premium: 0,
-        total_volume: 0,
-        total_size: 0,
-        trade_count: 0
-      });
     }
 
-    const level = summaryMap.get(key);
-    level.total_premium += trade.premium || 0;
-    level.total_volume += trade.volume || 0;
-    level.total_size += trade.size || 0;
-    level.trade_count += 1;
-  }
-
-  const top_levels = Array.from(summaryMap.values());
-
-  if (top_levels.length > 0) {
-    await storeDarkPoolLevelsInDB({ trading_day: today, top_levels });
-  } else {
-    console.log("⚠️ No dark pool summary levels to insert.");
+    // Commit transaction
+    await client.query("COMMIT");
+    console.log(`✅ Inserted ${parsedTrades.length} dark pool trades.`);
+  } catch (err) {
+    console.error("❌ Error during batch insert:", err.message);
+    await client.query("ROLLBACK");
+  } finally {
+    await client.end();
   }
 }
 
+// -----------------------------------------------
+// Export
+// -----------------------------------------------
 module.exports = {
   fetchAndStoreDarkPoolData
 };
