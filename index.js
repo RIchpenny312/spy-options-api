@@ -1141,7 +1141,7 @@ async function fetchAndStoreSpyOhlcAverages(client) {
   }
 }
 
-// ✅ Fetch and Store Enhanced Bid Ask Volume
+// ✅ Fetch and Store Enhanced Bid Ask
 async function fetchAndStoreEnhancedBidAsk(ticker, price_open, price_close) {
   try {
     console.log(`🔍 Fetching BID/ASK volume for ${ticker}...`);
@@ -1683,3 +1683,13 @@ if (require.main === module) {
       process.exit(1);
     });
 }
+
+const trade = {
+  executed_at: '2025-04-12T08:45:00Z' // Example timestamp
+};
+
+const bucketTime = normalizeToBucket(
+  trade.executed_at,
+  5, // Bucket size in minutes
+  'America/Chicago' // Timezone
+);
