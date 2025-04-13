@@ -113,20 +113,21 @@ app.get('/api/spy/ohlc', async (req, res) => {
 // 🔹 SPY OHLC Daily 
 app.get('/api/spy/ohlc/daily', async (req, res) => {
   try {
-    const date = req.query.date;
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
 
     const query = `
       SELECT *
       FROM spy_ohlc
-      WHERE bucket_time::date = $1
+      WHERE bucket_time::date BETWEEN $1 AND $2
         AND bucket_time::time BETWEEN '08:30:00' AND '15:00:00'
       ORDER BY bucket_time;
     `;
 
-    const data = await fetchData(query, [date]);
+    const data = await fetchData(query, [startDate, endDate]);
 
     if (!data || data.length === 0) {
-      return res.status(404).json({ error: `No SPY OHLC data found for ${date}` });
+      return res.status(404).json({ error: `No SPY OHLC data found between ${startDate} and ${endDate}` });
     }
 
     res.json(data);
@@ -273,6 +274,32 @@ app.get('/api/spy/option-price-levels/today', async (req, res) => {
     res.json(data);
 });
 
+// Add historical query support for SPY Option Price Levels
+app.get('/api/spy/option-price-levels/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM spy_option_price_levels
+      WHERE recorded_at::date BETWEEN $1 AND $2
+      ORDER BY recorded_at;
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY option price levels found between ${startDate} and ${endDate}` });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching SPY option price levels:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // 🔹 Fetch SPY Greeks by Strike
 app.get('/api/spy/greeks', async (req, res) => {
     const data = await fetchData(`
@@ -281,6 +308,32 @@ app.get('/api/spy/greeks', async (req, res) => {
         LIMIT 10
     `);
     res.json(data);
+});
+
+// Add historical query support for SPY Greeks
+app.get('/api/spy/greeks/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM spy_greek_exposure_strike
+      WHERE time::date BETWEEN $1 AND $2
+      ORDER BY time;
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY Greeks data found between ${startDate} and ${endDate}` });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching SPY Greeks:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // 🔹 Fetch SPY/SPX Greek Exposure (Last 5 records)
@@ -323,6 +376,32 @@ app.get('/api/spy/spot-gex/average', async (req, res) => {
     } finally {
         await client.end();
     }
+});
+
+// Add historical query support for SPY Spot GEX
+app.get('/api/spy/spot-gex/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM spy_spot_gex
+      WHERE time::date BETWEEN $1 AND $2
+      ORDER BY time;
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY Spot GEX data found between ${startDate} and ${endDate}` });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching SPY Spot GEX:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // ✅ Generalized SPY IV API: Supports 0 DTE, 5 DTE, future DTEs
@@ -524,6 +603,58 @@ app.get('/api/spy/market-tide/snapshot', async (req, res) => {
   }
 });
 
+// Add historical query support for SPY Market Tide
+app.get('/api/spy/market-tide/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM market_tide_data
+      WHERE timestamp::date BETWEEN $1 AND $2
+      ORDER BY timestamp;
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY Market Tide data found between ${startDate} and ${endDate}` });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching SPY Market Tide data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Add historical query support for SPY Market Tide Deltas
+app.get('/api/spy/market-tide/deltas/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM market_tide_deltas
+      WHERE timestamp::date BETWEEN $1 AND $2
+      ORDER BY timestamp;
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY Market Tide Deltas data found between ${startDate} and ${endDate}` });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching SPY Market Tide Deltas:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // 🔹 GPT Market Analysis Endpoint
 app.post('/api/gpt-analysis', async (req, res) => {
   try {
@@ -663,6 +794,59 @@ app.get('/api/spy/ohlc/historical', async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error(`❌ Error fetching historical SPY OHLC data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Add combined query endpoint for SPY OHLC, SPY IV, Market Tide, Delta Trends, and Spot GEX
+app.get('/api/spy/combined', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    const [ohlc, iv, marketTide, deltaTrends, spotGex] = await Promise.all([
+      fetchData(`
+        SELECT *
+        FROM spy_ohlc
+        WHERE bucket_time::date = $1
+          AND bucket_time::time BETWEEN '08:30:00' AND '15:00:00'
+        ORDER BY bucket_time;
+      `, [date]),
+      fetchData(`
+        SELECT *
+        FROM spy_iv_0dte
+        WHERE trading_day = $1
+        ORDER BY bucket_time;
+      `, [date]),
+      fetchData(`
+        SELECT *
+        FROM market_tide_data
+        WHERE timestamp::date = $1
+        ORDER BY timestamp;
+      `, [date]),
+      fetchData(`
+        SELECT *
+        FROM market_tide_deltas
+        WHERE timestamp::date = $1
+        ORDER BY timestamp;
+      `, [date]),
+      fetchData(`
+        SELECT *
+        FROM spy_spot_gex
+        WHERE time::date = $1
+        ORDER BY time;
+      `, [date])
+    ]);
+
+    res.json({
+      date,
+      ohlc,
+      iv,
+      market_tide: marketTide,
+      delta_trends: deltaTrends,
+      spot_gex: spotGex
+    });
+  } catch (error) {
+    console.error(`❌ Error fetching combined SPY data:`, error.message);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
