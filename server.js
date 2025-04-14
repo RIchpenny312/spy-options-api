@@ -613,6 +613,7 @@ app.get('/api/spy/market-tide/historical', async (req, res) => {
       SELECT *
       FROM market_tide_data
       WHERE timestamp::date BETWEEN $1 AND $2
+        AND timestamp::time BETWEEN '08:30:00' AND '15:00:00'
       ORDER BY timestamp;
     `;
 
