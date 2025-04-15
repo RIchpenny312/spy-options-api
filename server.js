@@ -449,7 +449,10 @@ app.get('/api/spy/iv/historical', async (req, res) => {
   try {
     const startDate = req.query.start_date || '2000-01-01';
     const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
-    const dte = parseInt(req.query.dte) || 0; // Default to 0 DTE
+    const dte = Number(req.query.dte);
+    if (![0, 5].includes(dte)) {
+      return res.status(400).json({ error: "Invalid DTE. Supported values: 0, 5" });
+    }
 
     const tableMap = {
       0: "spy_iv_0dte",
@@ -457,9 +460,6 @@ app.get('/api/spy/iv/historical', async (req, res) => {
     };
 
     const table = tableMap[dte];
-    if (!table) {
-      return res.status(400).json({ error: "Invalid DTE. Supported values: 0, 5" });
-    }
 
     const query = `
       SELECT *
@@ -471,7 +471,9 @@ app.get('/api/spy/iv/historical', async (req, res) => {
     const data = await fetchData(query, [startDate, endDate]);
 
     if (!data || data.length === 0) {
-      return res.status(404).json({ error: `No SPY IV data found between ${startDate} and ${endDate}` });
+      return res.status(404).json({
+        error: `No SPY IV data found for ${dte} DTE between ${startDate} and ${endDate}.`
+      });
     }
 
     res.json(data);
