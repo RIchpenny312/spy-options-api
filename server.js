@@ -656,6 +656,36 @@ app.get('/api/spy/market-tide/deltas/historical', async (req, res) => {
   }
 });
 
+// 🔹 Fetch Historical Delta Trends for a Specific Date
+app.get('/api/spy/delta-trends/historical', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM market_tide_deltas
+      WHERE timestamp::date = $1
+        AND timestamp::time BETWEEN '08:30:00' AND '15:00:00'
+      ORDER BY timestamp ASC;
+    `;
+
+    const data = await fetchData(query, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No delta trends found for ${date}` });
+    }
+
+    res.json({
+      date,
+      intervals: data.length,
+      delta_trends: data
+    });
+  } catch (error) {
+    console.error(`❌ Error fetching historical delta trends:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // 🔹 GPT Market Analysis Endpoint
 app.post('/api/gpt-analysis', async (req, res) => {
   try {
@@ -799,56 +829,70 @@ app.get('/api/spy/ohlc/historical', async (req, res) => {
   }
 });
 
-// Add combined query endpoint for SPY OHLC, SPY IV, Market Tide, Delta Trends, and Spot GEX
-app.get('/api/spy/combined', async (req, res) => {
+// 🔹 Combined Endpoint (Time-Segmented by Trading Hours)
+const TIME_SEGMENTS = {
+  morning: ['08:30:00', '10:30:00'],
+  midday: ['10:30:01', '12:30:00'],
+  afternoon: ['12:30:01', '15:00:00']
+};
+
+app.get('/api/spy/combined/segment', async (req, res) => {
   try {
+    const segment = req.query.segment || 'morning';
+    const [startTime, endTime] = TIME_SEGMENTS[segment] || TIME_SEGMENTS.morning;
     const date = req.query.date || new Date().toISOString().split("T")[0];
 
     const [ohlc, iv, marketTide, deltaTrends, spotGex] = await Promise.all([
       fetchData(`
-        SELECT *
-        FROM spy_ohlc
-        WHERE bucket_time::date = $1
-          AND bucket_time::time BETWEEN '08:30:00' AND '15:00:00'
-        ORDER BY bucket_time;
-      `, [date]),
+        SELECT * FROM spy_ohlc 
+        WHERE bucket_time::date = $1 
+          AND bucket_time::time BETWEEN $2 AND $3
+        ORDER BY bucket_time
+      `, [date, startTime, endTime]),
+
       fetchData(`
-        SELECT *
-        FROM spy_iv_0dte
-        WHERE trading_day = $1
-        ORDER BY bucket_time;
-      `, [date]),
+        SELECT * FROM spy_iv_0dte 
+        WHERE trading_day = $1 
+          AND bucket_time::time BETWEEN $2 AND $3
+        ORDER BY bucket_time
+      `, [date, startTime, endTime]),
+
       fetchData(`
-        SELECT *
-        FROM market_tide_data
-        WHERE timestamp::date = $1
-        ORDER BY timestamp;
-      `, [date]),
+        SELECT * FROM market_tide_data 
+        WHERE timestamp::date = $1 
+          AND timestamp::time BETWEEN $2 AND $3
+        ORDER BY timestamp
+      `, [date, startTime, endTime]),
+
       fetchData(`
-        SELECT *
-        FROM market_tide_deltas
-        WHERE timestamp::date = $1
-        ORDER BY timestamp;
-      `, [date]),
+        SELECT * FROM market_tide_deltas 
+        WHERE timestamp::date = $1 
+          AND timestamp::time BETWEEN $2 AND $3
+        ORDER BY timestamp
+      `, [date, startTime, endTime]),
+
       fetchData(`
-        SELECT *
-        FROM spy_spot_gex
-        WHERE time::date = $1
-        ORDER BY time;
-      `, [date])
+        SELECT * FROM spy_spot_gex 
+        WHERE time::date = $1 
+          AND time::time BETWEEN $2 AND $3
+        ORDER BY time
+      `, [date, startTime, endTime])
     ]);
 
     res.json({
+      segment,
       date,
+      time_range: [startTime, endTime],
       ohlc,
       iv,
       market_tide: marketTide,
       delta_trends: deltaTrends,
       spot_gex: spotGex
     });
-  } catch (error) {
-    console.error(`❌ Error fetching combined SPY data:`, error.message);
-    res.status(500).json({ error: "Internal Server Error" });
+
+  } catch (err) {
+    console.error("❌ Error in /api/spy/combined/segment:", err.message);
+    res.status(500).json({ error: "Failed to retrieve segment data" });
   }
 });
 
