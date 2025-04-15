@@ -444,6 +444,43 @@ app.get("/api/spy/iv/:dte", async (req, res) => {
   }
 });
 
+// Add historical query support for SPY IV
+app.get('/api/spy/iv/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+    const dte = parseInt(req.query.dte) || 0; // Default to 0 DTE
+
+    const tableMap = {
+      0: "spy_iv_0dte",
+      5: "spy_iv_5dte"
+    };
+
+    const table = tableMap[dte];
+    if (!table) {
+      return res.status(400).json({ error: "Invalid DTE. Supported values: 0, 5" });
+    }
+
+    const query = `
+      SELECT *
+      FROM ${table}
+      WHERE trading_day BETWEEN $1 AND $2
+      ORDER BY trading_day;
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY IV data found between ${startDate} and ${endDate}` });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error(`❌ Error fetching historical SPY IV data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // ✅ Fetch SPY Intraday Summary
 app.get('/api/spy/intraday-summary', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split("T")[0];
