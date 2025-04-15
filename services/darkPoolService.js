@@ -68,8 +68,8 @@ async function fetchAndStoreDarkPoolData() {
   const rawTrades = response.data?.data || [];
 
   const today = dayjs().tz(TIMEZONE).format("YYYY-MM-DD");
-  const marketOpen = dayjs.tz(`${today} 08:00:00`, TIMEZONE); // Adjusted to 8:00 AM
-  const marketClose = dayjs.tz(`${today} 16:00:00`, TIMEZONE); // Adjusted to 4:00 PM
+  const marketOpen = dayjs.tz(`${today} 07:30:00`, TIMEZONE); // Adjusted to 7:30 AM
+  const marketClose = dayjs.tz(`${today} 16:30:00`, TIMEZONE); // Adjusted to 4:30 PM
 
   // Debugging: Log raw trades count
   console.log(`🔍 Raw trades fetched: ${rawTrades.length}`);
@@ -89,29 +89,25 @@ async function fetchAndStoreDarkPoolData() {
   // Debugging: Log filtered trades count
   console.log(`✅ Valid trades for today: ${todayTrades.length}`);
 
-  if (todayTrades.length === 0) {
-    console.log("⚠️ No valid dark pool trades for today.");
-    return;
-  }
-
+  // Handle missing fields gracefully
   const parsedTrades = todayTrades.map(trade => {
     const executedLocal = dayjs.utc(trade.executed_at).tz(TIMEZONE);
     const bucketTime = normalizeToBucket(trade.executed_at);
 
     return {
-      tracking_id: trade.tracking_id,
-      ticker: trade.ticker,
-      price: parseFloat(trade.price),
-      size: parseInt(trade.size),
-      premium: parseFloat(trade.premium),
-      volume: parseInt(trade.volume),
+      tracking_id: trade.tracking_id || 'unknown',
+      ticker: trade.ticker || 'SPY',
+      price: parseFloat(trade.price) || 0,
+      size: parseInt(trade.size) || 0,
+      premium: parseFloat(trade.premium) || 0,
+      volume: parseInt(trade.volume) || 0,
       executed_at: executedLocal.toISOString(),
       bucket_time: bucketTime,
-      nbbo_bid: parseFloat(trade.nbbo_bid),
-      nbbo_ask: parseFloat(trade.nbbo_ask),
-      bid_quantity: parseInt(trade.nbbo_bid_quantity),
-      ask_quantity: parseInt(trade.nbbo_ask_quantity),
-      market_center: trade.market_center,
+      nbbo_bid: parseFloat(trade.nbbo_bid) || 0,
+      nbbo_ask: parseFloat(trade.nbbo_ask) || 0,
+      bid_quantity: parseInt(trade.nbbo_bid_quantity) || 0,
+      ask_quantity: parseInt(trade.nbbo_ask_quantity) || 0,
+      market_center: trade.market_center || 'unknown',
       trade_day: executedLocal.format("YYYY-MM-DD") // Added trade_day for efficient filtering
     };
   });
