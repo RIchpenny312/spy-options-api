@@ -444,41 +444,30 @@ app.get("/api/spy/iv/:dte", async (req, res) => {
   }
 });
 
-// Add historical query support for SPY IV
-app.get('/api/spy/iv/historical', async (req, res) => {
+// Add dedicated endpoint for SPY IV 0_DTE
+app.get('/api/spy/iv/0dte', async (req, res) => {
   try {
-    const startDate = req.query.start_date || '2000-01-01';
-    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
-    const dte = Number(req.query.dte);
-    if (![0, 5].includes(dte)) {
-      return res.status(400).json({ error: "Invalid DTE. Supported values: 0, 5" });
-    }
-
-    const tableMap = {
-      0: "spy_iv_0dte",
-      5: "spy_iv_5dte"
-    };
-
-    const table = tableMap[dte];
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    const startTime = req.query.start_time || '00:00:00';
+    const endTime = req.query.end_time || '23:59:59';
 
     const query = `
       SELECT *
-      FROM ${table}
-      WHERE trading_day BETWEEN $1 AND $2
-      ORDER BY trading_day;
+      FROM spy_iv_0dte
+      WHERE trading_day = $1
+        AND bucket_time::time BETWEEN $2 AND $3
+      ORDER BY bucket_time;
     `;
 
-    const data = await fetchData(query, [startDate, endDate]);
+    const data = await fetchData(query, [date, startTime, endTime]);
 
     if (!data || data.length === 0) {
-      return res.status(404).json({
-        error: `No SPY IV data found for ${dte} DTE between ${startDate} and ${endDate}.`
-      });
+      return res.status(404).json({ error: `No SPY IV 0_DTE data found for ${date} between ${startTime} and ${endTime}` });
     }
 
     res.json(data);
   } catch (error) {
-    console.error(`❌ Error fetching historical SPY IV data:`, error.message);
+    console.error(`❌ Error fetching SPY IV 0_DTE data:`, error.message);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -715,6 +704,37 @@ app.get('/api/spy/delta-trends/historical', async (req, res) => {
 
     res.json({
       date,
+      intervals: data.length,
+      delta_trends: data
+    });
+  } catch (error) {
+    console.error(`❌ Error fetching historical delta trends:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Add dedicated historical query endpoint for Delta Trends
+app.get('/api/delta-trends/historical', async (req, res) => {
+  try {
+    const startDate = req.query.start_date || '2000-01-01';
+    const endDate = req.query.end_date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM market_tide_deltas
+      WHERE timestamp::date BETWEEN $1 AND $2
+      ORDER BY timestamp ASC;
+    `;
+
+    const data = await fetchData(query, [startDate, endDate]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No delta trends found between ${startDate} and ${endDate}` });
+    }
+
+    res.json({
+      start_date: startDate,
+      end_date: endDate,
       intervals: data.length,
       delta_trends: data
     });
