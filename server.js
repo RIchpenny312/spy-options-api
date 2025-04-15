@@ -954,6 +954,136 @@ app.get('/api/spy/combined/segment', async (req, res) => {
   }
 });
 
+// 🔹 Fetch Last 6 SPY OHLC Data (Intraday)
+app.get('/api/spy/ohlc/intraday', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM spy_ohlc
+      WHERE bucket_time::date = $1
+      ORDER BY bucket_time DESC
+      LIMIT 6;
+    `;
+
+    const data = await fetchData(query, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY OHLC data found for ${date}` });
+    }
+
+    res.json(data.reverse()); // Return in chronological order
+  } catch (error) {
+    console.error(`❌ Error fetching SPY OHLC intraday data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// 🔹 Fetch Last 6 SPY IV 0DTE Data (Intraday)
+app.get('/api/spy/iv/0dte/intraday', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM spy_iv_0dte
+      WHERE trading_day = $1
+      ORDER BY bucket_time DESC
+      LIMIT 6;
+    `;
+
+    const data = await fetchData(query, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No SPY IV 0DTE data found for ${date}` });
+    }
+
+    res.json(data.reverse()); // Return in chronological order
+  } catch (error) {
+    console.error(`❌ Error fetching SPY IV 0DTE intraday data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// 🔹 Fetch Last 6 Market Tide Net Premiums (Intraday)
+app.get('/api/spy/market-tide/net-premiums/intraday', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT timestamp, net_call_premium, net_put_premium, net_volume
+      FROM market_tide_data
+      WHERE date = $1
+      ORDER BY timestamp DESC
+      LIMIT 6;
+    `;
+
+    const data = await fetchData(query, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No Market Tide net premiums data found for ${date}` });
+    }
+
+    res.json(data.reverse()); // Return in chronological order
+  } catch (error) {
+    console.error(`❌ Error fetching Market Tide net premiums intraday data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// 🔹 Fetch Last 6 Delta Trends (Intraday)
+app.get('/api/spy/delta-trends/intraday', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT timestamp, delta_call, delta_put, delta_volume, sentiment
+      FROM market_tide_deltas
+      WHERE timestamp::date = $1
+      ORDER BY timestamp DESC
+      LIMIT 6;
+    `;
+
+    const data = await fetchData(query, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No Delta Trends data found for ${date}` });
+    }
+
+    res.json(data.reverse()); // Return in chronological order
+  } catch (error) {
+    console.error(`❌ Error fetching Delta Trends intraday data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// 🔹 Fetch Last 6 Spot GEX Data (Intraday)
+app.get('/api/spy/spot-gex/intraday', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+
+    const query = `
+      SELECT *
+      FROM spy_spot_gex
+      WHERE time::date = $1
+      ORDER BY time DESC
+      LIMIT 6;
+    `;
+
+    const data = await fetchData(query, [date]);
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No Spot GEX data found for ${date}` });
+    }
+
+    res.json(data.reverse()); // Return in chronological order
+  } catch (error) {
+    console.error(`❌ Error fetching Spot GEX intraday data:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------

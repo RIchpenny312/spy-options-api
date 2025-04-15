@@ -83,6 +83,43 @@ paths:
                       type: string
                       format: date-time
 
+  /api/spy/ohlc/intraday:
+    get:
+      summary: Get Last 6 SPY OHLC Data (Intraday)
+      operationId: getSPYOHLCIntraday
+      description: Fetch the last 6 SPY OHLC data points for the specified date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved SPY OHLC intraday data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    open:
+                      type: number
+                    high:
+                      type: number
+                    low:
+                      type: number
+                    close:
+                      type: number
+                    volume:
+                      type: integer
+                    bucket_time:
+                      type: string
+                      format: date-time
+
   /api/spy/intraday-summary:
     get:
       summary: Get SPY Intraday Summary
@@ -247,6 +284,41 @@ paths:
                     type: string
                     format: date-time
 
+  /api/spy/spot-gex/intraday:
+    get:
+      summary: Get Last 6 Spot GEX Data (Intraday)
+      operationId: getSpotGEXIntraday
+      description: Fetch the last 6 Spot GEX data points for the specified date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved Spot GEX intraday data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    time:
+                      type: string
+                      format: date-time
+                    price:
+                      type: number
+                    gamma_oi:
+                      type: number
+                    charm_oi:
+                      type: number
+                    vanna_oi:
+                      type: number
+
   /api/spy/iv/0dte:
     get:
       summary: Get SPY Implied Volatility (0 DTE)
@@ -314,6 +386,35 @@ paths:
                         recorded_at:
                           type: string
                           format: date-time
+
+  /api/spy/iv/0dte/intraday:
+    get:
+      summary: Get Last 6 SPY IV 0DTE Data (Intraday)
+      operationId: getSPYIV0DTEIntraday
+      description: Fetch the last 6 SPY IV 0DTE data points for the specified date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved SPY IV 0DTE intraday data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    bucket_time:
+                      type: string
+                      format: date-time
+                    implied_volatility:
+                      type: number
 
   /api/spy/iv/0dte:
     get:
@@ -400,6 +501,39 @@ paths:
                     recorded_at:
                       type: string
                       format: date-time
+
+  /api/spy/market-tide/net-premiums/intraday:
+    get:
+      summary: Get Last 6 Market Tide Net Premiums (Intraday)
+      operationId: getMarketTideNetPremiumsIntraday
+      description: Fetch the last 6 Market Tide net premiums data points for the specified date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved Market Tide net premiums intraday data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    timestamp:
+                      type: string
+                      format: date-time
+                    net_call_premium:
+                      type: number
+                    net_put_premium:
+                      type: number
+                    net_volume:
+                      type: integer
 
   /api/spy/market-tide/latest:
     get:
@@ -488,6 +622,41 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/MarketTideSnapshot'
+
+  /api/spy/delta-trends/intraday:
+    get:
+      summary: Get Last 6 Delta Trends (Intraday)
+      operationId: getDeltaTrendsIntraday
+      description: Fetch the last 6 Delta Trends data points for the specified date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved Delta Trends intraday data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    timestamp:
+                      type: string
+                      format: date-time
+                    delta_call:
+                      type: number
+                    delta_put:
+                      type: number
+                    delta_volume:
+                      type: integer
+                    sentiment:
+                      type: string
 
   /api/spy/greeks:
     get:
