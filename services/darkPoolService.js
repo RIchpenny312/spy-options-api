@@ -59,6 +59,14 @@ async function fetchWithRetry(url, retries = 3, delay = 5000) {
 }
 
 // -----------------------------------------------
+// Utility: Log Insert Summary
+// -----------------------------------------------
+function logInsertSummary(count, fallbackUsed) {
+  const tag = fallbackUsed ? '📥 [Fallback]' : '✅';
+  console.log(`${tag} Inserted ${count} dark pool trades into DB.`);
+}
+
+// -----------------------------------------------
 // Main Function: Fetch and Store Today's Dark Pool Data
 // -----------------------------------------------
 async function fetchAndStoreDarkPoolData() {
@@ -67,27 +75,74 @@ async function fetchAndStoreDarkPoolData() {
   const response = await fetchWithRetry("https://api.unusualwhales.com/api/darkpool/SPY");
   const rawTrades = response.data?.data || [];
 
+  // Double-fallback guard: Skip processing if no trades are received
+  if (rawTrades.length === 0) {
+    console.warn("⚠️ No trades received from API — skipping insertion.");
+    return;
+  }
+
+  // Sort rawTrades by executed_at to ensure the latest trade is on top
+  rawTrades.sort((a, b) => new Date(b.executed_at) - new Date(a.executed_at));
+
   const today = dayjs().tz(TIMEZONE).format("YYYY-MM-DD");
   const marketOpen = dayjs.tz(`${today} 07:30:00`, TIMEZONE); // Adjusted to 7:30 AM
   const marketClose = dayjs.tz(`${today} 16:30:00`, TIMEZONE); // Adjusted to 4:30 PM
 
-  // Debugging: Log raw trades count
-  console.log(`🔍 Raw trades fetched: ${rawTrades.length}`);
+  // Log the most recent trade timestamp
+  if (rawTrades.length > 0) {
+    const mostRecent = dayjs.utc(rawTrades[0].executed_at).tz(TIMEZONE).format();
+    console.log(`🕒 Most recent trade timestamp (local): ${mostRecent}`);
+  }
 
-  // Filter trades to ensure they fall within market hours
+  // Adjust time window logic to include boundary trades
   const todayTrades = rawTrades.filter(trade => {
     const executed = dayjs.utc(trade.executed_at).tz(TIMEZONE);
     const isValid = executed.isSame(today, 'day') &&
-                    executed.isAfter(marketOpen) &&
-                    executed.isBefore(marketClose);
+                    executed.isSameOrAfter(marketOpen) &&
+                    executed.isSameOrBefore(marketClose);
     if (!isValid) {
       console.warn(`⚠️ Excluded trade: ${JSON.stringify(trade)}`);
     }
     return isValid;
   });
 
+  // Log fallback explanation
+  if (todayTrades.length === 0) {
+    console.info("📥 Using fallback trades from most recent date due to absence of today’s entries.");
+  }
+
+  // Optional fallback logic for missing trades
+  if (todayTrades.length === 0) {
+    const mostRecentTrade = rawTrades[0];
+    const mostRecentDate = dayjs.utc(mostRecentTrade.executed_at).tz(TIMEZONE).format("YYYY-MM-DD");
+    console.warn(`⚠️ No trades for ${today}, falling back to most recent: ${mostRecentDate}`);
+    todayTrades.push(...rawTrades);
+  }
+
   // Debugging: Log filtered trades count
   console.log(`✅ Valid trades for today: ${todayTrades.length}`);
+
+  // Analyze `off_vol` values
+  const offVolValues = rawTrades.map(trade => parseInt(trade.off_vol) || 0).filter(val => val > 0);
+
+  if (offVolValues.length > 0) {
+    const sortedOffVol = [...offVolValues].sort((a, b) => b - a); // Descending order
+    const top10 = sortedOffVol.slice(0, 10);
+    const mean = (offVolValues.reduce((sum, val) => sum + val, 0) / offVolValues.length).toFixed(2);
+    const median = sortedOffVol[Math.floor(offVolValues.length / 2)];
+    const min = Math.min(...offVolValues);
+    const max = Math.max(...offVolValues);
+
+    console.log("📊 Off-Exchange Volume Analysis:");
+    console.log(`   - Total Trades Analyzed: ${offVolValues.length}`);
+    console.log(`   - Mean: ${mean}`);
+    console.log(`   - Median: ${median}`);
+    console.log(`   - Min: ${min}`);
+    console.log(`   - Max: ${max}`);
+    console.log(`   - Top 10 Off-Vol Values: ${top10.join(", ")}`);
+  } else {
+    console.warn("⚠️ No valid `off_vol` values found for analysis.");
+  }
 
   // Handle missing fields gracefully
   const parsedTrades = todayTrades.map(trade => {
@@ -108,9 +163,13 @@ async function fetchAndStoreDarkPoolData() {
       bid_quantity: parseInt(trade.nbbo_bid_quantity) || 0,
       ask_quantity: parseInt(trade.nbbo_ask_quantity) || 0,
       market_center: trade.market_center || 'unknown',
-      trade_day: executedLocal.format("YYYY-MM-DD") // Added trade_day for efficient filtering
+      trade_day: executedLocal.format("YYYY-MM-DD"), // Added trade_day for efficient filtering
+      is_fallback: todayTrades.length === 0 // Tag fallback data
     };
   });
+
+  // Log sample parsed trades for debugging
+  console.table(parsedTrades.slice(0, 3));
 
   const client = new Client(DB_CONFIG);
   await client.connect();
@@ -119,13 +178,16 @@ async function fetchAndStoreDarkPoolData() {
     // Begin transaction for batch inserts
     await client.query("BEGIN");
 
+    // Future-proofing: Add a note for batch insert optimization
+    // TODO: Optimize batch inserts using COPY FROM or batched INSERT INTO for large datasets
+
     for (const trade of parsedTrades) {
       await client.query(`
         INSERT INTO spy_dark_pool (
           tracking_id, ticker, price, size, premium, volume,
           executed_at, bucket_time, nbbo_bid, nbbo_ask,
-          bid_quantity, ask_quantity, market_center, trade_day
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          bid_quantity, ask_quantity, market_center, trade_day, is_fallback
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         ON CONFLICT (tracking_id) DO NOTHING
       `, [
         trade.tracking_id,
@@ -141,13 +203,14 @@ async function fetchAndStoreDarkPoolData() {
         trade.bid_quantity,
         trade.ask_quantity,
         trade.market_center,
-        trade.trade_day
+        trade.trade_day,
+        trade.is_fallback
       ]);
     }
 
     // Commit transaction
     await client.query("COMMIT");
-    console.log(`✅ Inserted ${parsedTrades.length} dark pool trades.`);
+    logInsertSummary(parsedTrades.length, todayTrades.length === 0);
   } catch (err) {
     console.error("❌ Error during batch insert:", err.message);
     await client.query("ROLLBACK");
