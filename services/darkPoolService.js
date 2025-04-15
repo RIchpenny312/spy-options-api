@@ -68,16 +68,26 @@ async function fetchAndStoreDarkPoolData() {
   const rawTrades = response.data?.data || [];
 
   const today = dayjs().tz(TIMEZONE).format("YYYY-MM-DD");
-  const marketOpen = dayjs.tz(`${today} 08:30:00`, TIMEZONE);
-  const marketClose = dayjs.tz(`${today} 15:00:00`, TIMEZONE);
+  const marketOpen = dayjs.tz(`${today} 08:00:00`, TIMEZONE); // Adjusted to 8:00 AM
+  const marketClose = dayjs.tz(`${today} 16:00:00`, TIMEZONE); // Adjusted to 4:00 PM
+
+  // Debugging: Log raw trades count
+  console.log(`🔍 Raw trades fetched: ${rawTrades.length}`);
 
   // Filter trades to ensure they fall within market hours
   const todayTrades = rawTrades.filter(trade => {
     const executed = dayjs.utc(trade.executed_at).tz(TIMEZONE);
-    return executed.isSame(today, 'day') &&
-           executed.isAfter(marketOpen) &&
-           executed.isBefore(marketClose);
+    const isValid = executed.isSame(today, 'day') &&
+                    executed.isAfter(marketOpen) &&
+                    executed.isBefore(marketClose);
+    if (!isValid) {
+      console.warn(`⚠️ Excluded trade: ${JSON.stringify(trade)}`);
+    }
+    return isValid;
   });
+
+  // Debugging: Log filtered trades count
+  console.log(`✅ Valid trades for today: ${todayTrades.length}`);
 
   if (todayTrades.length === 0) {
     console.log("⚠️ No valid dark pool trades for today.");

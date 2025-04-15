@@ -13,8 +13,11 @@ async function storeDarkPoolLevelsInDB({ trading_day, top_levels }) {
   const client = new Client(DB_CONFIG);
   await client.connect();
 
+  console.log(`🔍 Storing ${top_levels.length} dark pool levels for ${trading_day}`);
+
   for (const level of top_levels) {
     try {
+      console.log(`📊 Inserting level: ${JSON.stringify(level)}`);
       await client.query(`
         INSERT INTO spy_dark_pool_levels (
           trading_day, price, total_premium, total_volume, total_size, trade_count

@@ -86,6 +86,7 @@ paths:
   /api/spy/intraday-summary:
     get:
       summary: Get SPY Intraday Summary
+      operationId: getIntradaySummary
       description: Fetch SPY daily intraday summary including OHLC, VWAP, price structure, dealer exposure, market tide, and delta trends.
       parameters:
         - name: date
@@ -314,6 +315,61 @@ paths:
                           type: string
                           format: date-time
 
+  /api/spy/iv/0dte:
+    get:
+      summary: Get SPY IV 0_DTE Data
+      operationId: getSPYIV0DTEData
+      description: Fetch SPY IV 0_DTE data for a specific date and time range.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD). Defaults to today.
+        - name: start_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: time
+          description: The start time for the query (HH:MM:SS). Defaults to 00:00:00.
+        - name: end_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: time
+          description: The end time for the query (HH:MM:SS). Defaults to 23:59:59.
+      responses:
+        "200":
+          description: Successfully retrieved SPY IV 0_DTE data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    bucket_time:
+                      type: string
+                      format: date-time
+                    implied_volatility:
+                      type: number
+                    delta:
+                      type: number
+                    gamma:
+                      type: number
+                    vega:
+                      type: number
+                    theta:
+                      type: number
+        "404":
+          description: No SPY IV 0_DTE data found for the specified date and time range.
+        "500":
+          description: Internal Server Error
+
   /api/spy/market-tide:
     get:
       summary: Get the last 10 SPY Market Tide records
@@ -348,6 +404,7 @@ paths:
   /api/spy/market-tide/latest:
     get:
       summary: Get the latest Market Tide data
+      operationId: getLatestMarketTide
       description: Returns the most recent Market Tide record (5-minute interval)
       responses:
         "200":
@@ -356,10 +413,29 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  timestamp:
+                    type: string
+                    format: date-time
+                  net_call_premium:
+                    type: number
+                  net_put_premium:
+                    type: number
+                  net_volume:
+                    type: integer
+                  delta_call:
+                    type: number
+                  delta_put:
+                    type: number
+                  delta_volume:
+                    type: integer
+                  sentiment:
+                    type: string
 
   /api/spy/market-tide/deltas/today:
     get:
       summary: Get today's Market Tide delta trends
+      operationId: getTodayMarketTideDeltas
       description: Returns all delta trend entries for the current trading day
       responses:
         "200":
@@ -708,6 +784,7 @@ paths:
   /api/darkpool/top:
     get:
       summary: Get top SPY dark pool levels
+      operationId: getDarkPoolTopLevels
       description: |
         Returns the top aggregated SPY dark pool price levels for a given trading day.
         If no date is provided, the latest available trading day will be used as fallback.
@@ -756,6 +833,63 @@ paths:
                         trade_count:
                           type: integer
         '500':
+          description: Internal Server Error
+
+  /api/spy/delta-trends/historical:
+    get:
+      summary: Get Historical Delta Trends
+      operationId: getHistoricalDeltaTrends
+      description: Fetch historical delta trends for a specific date or date range.
+      parameters:
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The start date for the query (YYYY-MM-DD). Defaults to 2000-01-01.
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The end date for the query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved historical delta trends.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  start_date:
+                    type: string
+                    format: date
+                  end_date:
+                    type: string
+                    format: date
+                  intervals:
+                    type: integer
+                  delta_trends:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        delta_call:
+                          type: number
+                        delta_put:
+                          type: number
+                        delta_volume:
+                          type: integer
+                        sentiment:
+                          type: string
+        "404":
+          description: No delta trends found for the specified date range.
+        "500":
           description: Internal Server Error
 
 components:

@@ -39,6 +39,23 @@ async function getTopDarkPoolLevels({ date = null, limit = 10 } = {}) {
   `;
 
   const result = await client.query(query, [tradingDay, limit]);
+
+  if (result.rows.length === 0) {
+    console.warn(`⚠️ No dark pool levels found for ${tradingDay}. Falling back to previous trading day.`);
+    const previousDay = dayjs(tradingDay).subtract(1, 'day').format("YYYY-MM-DD");
+    const fallbackResult = await client.query(query, [previousDay, limit]);
+    return {
+      trading_day: previousDay,
+      top_levels: fallbackResult.rows.map(row => ({
+        price: parseFloat(row.price),
+        total_premium: parseFloat(row.total_premium),
+        total_volume: parseInt(row.total_volume) || 0,
+        total_size: parseInt(row.total_size) || 0,
+        trade_count: parseInt(row.trade_count)
+      }))
+    };
+  }
+
   await client.end();
 
   return {
