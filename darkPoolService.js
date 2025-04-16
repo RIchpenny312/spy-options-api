@@ -61,13 +61,16 @@ async function fetchWithRetry(url, retries = 3, delay = 5000) {
 // -----------------------------------------------
 // Main Function: Fetch and Store Today's Dark Pool Data
 // -----------------------------------------------
-async function fetchAndStoreDarkPoolData() {
+async function fetchAndStoreDarkPoolData(date = null) {
   console.log("🔍 Fetching Dark Pool Trades...");
 
-  const response = await fetchWithRetry("https://api.unusualwhales.com/api/darkpool/SPY");
+  const localDate = date ? dayjs(date).tz(TIMEZONE) : dayjs().tz(TIMEZONE);
+  const today = localDate.format("YYYY-MM-DD");
+  console.log(`📅 Target dark pool date: ${today}`);
+  const apiUrl = `https://api.unusualwhales.com/api/darkpool/SPY${date ? `?date=${today}` : ''}`;
+  const response = await fetchWithRetry(apiUrl);
   const rawTrades = response.data?.data || [];
 
-  const today = dayjs().tz(TIMEZONE).format("YYYY-MM-DD");
   const todayTrades = rawTrades.filter(trade => {
     const tradeDate = dayjs.utc(trade.executed_at).tz(TIMEZONE).format("YYYY-MM-DD");
     return tradeDate === today;
