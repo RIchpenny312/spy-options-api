@@ -1074,7 +1074,7 @@ app.get('/api/spy/delta-trends/intraday', async (req, res) => {
     const date = req.query.date || new Date().toISOString().split("T")[0];
 
     const query = `
-      SELECT timestamp, delta_call, delta_put, delta_volume, sentiment
+      SELECT timestamp, delta_call, delta_put, delta_volume, sentiment, delta_call_pct_change, delta_put_pct_change, delta_volume_pct_change
       FROM market_tide_deltas
       WHERE timestamp::date = $1
       ORDER BY timestamp DESC

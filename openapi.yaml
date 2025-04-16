@@ -657,6 +657,12 @@ paths:
                       type: integer
                     sentiment:
                       type: string
+                    delta_call_pct_change:
+                      type: number
+                    delta_put_pct_change:
+                      type: number
+                    delta_volume_pct_change:
+                      type: number
 
   /api/spy/greeks:
     get:
@@ -1056,6 +1062,12 @@ paths:
                           type: integer
                         sentiment:
                           type: string
+                        delta_call_pct_change:
+                          type: number
+                        delta_put_pct_change:
+                          type: number
+                        delta_volume_pct_change:
+                          type: number
         "404":
           description: No delta trends found for the specified date range.
         "500":
