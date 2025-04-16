@@ -841,6 +841,24 @@ app.get('/api/darkpool/top', async (req, res) => {
   }
 });
 
+// 🔹 Fetch Rolling Averages for SPY Dark Pool Levels
+app.get('/api/spy/darkpool/rolling-averages', async (req, res) => {
+  try {
+    const windowSize = parseInt(req.query.window_size) || 3; // Default to 3-day rolling average
+
+    const rollingAverages = await require('./services/darkPoolLevelsService').computeRollingAverages({ windowSize });
+
+    if (!rollingAverages || rollingAverages.length === 0) {
+      return res.status(404).json({ error: `No rolling averages found for the specified window size: ${windowSize}` });
+    }
+
+    res.json(rollingAverages);
+  } catch (error) {
+    console.error(`❌ Error fetching rolling averages:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // 🔹 Run Delta Trend Computation (for specific date or today)
 app.get('/api/spy/delta-trend/:date?', async (req, res) => {
   try {
