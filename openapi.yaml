@@ -1061,6 +1061,102 @@ paths:
         "500":
           description: Internal Server Error
 
+  /api/spy/darkpool/rolling-averages:
+    get:
+      summary: Get Rolling Averages for SPY Dark Pool Levels
+      operationId: getRollingAveragesDarkPool
+      description: Fetch rolling averages for SPY dark pool levels based on a specified window size.
+      parameters:
+        - name: window_size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 3
+          description: The rolling window size (e.g., 3 for a 3-day rolling average). Defaults to 3.
+      responses:
+        "200":
+          description: Successfully retrieved rolling averages for SPY dark pool levels.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    price:
+                      type: number
+                    avg_size:
+                      type: number
+                    total_premium:
+                      type: number
+                    total_volume:
+                      type: number
+                    days_appeared:
+                      type: integer
+                    confidence:
+                      type: string
+                      enum: [High, Medium, Low]
+        "404":
+          description: No rolling averages found for the specified window size.
+        "500":
+          description: Internal Server Error
+
+  /api/spy/darkpool/high-confidence-near-spot:
+    get:
+      summary: Get High Confidence Dark Pool Levels Near Spot Price
+      operationId: getHighConfidenceDarkPoolNearSpot
+      description: >
+        Returns high confidence SPY dark pool price levels within a specified proximity to the spot price, using a rolling window of N days.
+      parameters:
+        - name: windowDays
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 3
+          description: Number of days for the rolling window (default: 3).
+        - name: spotPrice
+          in: query
+          required: true
+          schema:
+            type: number
+          description: The spot price to compare against (required).
+        - name: proximity
+          in: query
+          required: false
+          schema:
+            type: number
+            default: 1.0
+          description: The price proximity threshold (default: 1.0).
+      responses:
+        "200":
+          description: Successfully retrieved high confidence dark pool levels near spot price.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    price:
+                      type: number
+                    avg_size:
+                      type: number
+                    total_volume:
+                      type: number
+                    total_premium:
+                      type: number
+                    days_appeared:
+                      type: integer
+                    confidence:
+                      type: string
+                      enum: [High, Medium, Low]
+        "400":
+          description: spotPrice query parameter is required and must be a number.
+        "500":
+          description: Internal Server Error
+
 components:
   schemas:
     BidShiftSignal:

@@ -220,8 +220,53 @@ async function fetchAndStoreDarkPoolData() {
 }
 
 // -----------------------------------------------
+// Get high confidence dark pool levels near a spot price
+// -----------------------------------------------
+async function getHighConfidenceLevelsNearSpot({ windowDays = 3, spotPrice, proximity = 1.0 }) {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  // 1. Get last N days of dark pool levels
+  const query = `
+    SELECT price, total_size, total_volume, total_premium, trade_day
+    FROM spy_dark_pool_levels
+    WHERE trade_day >= (CURRENT_DATE - INTERVAL '${windowDays - 1} days')
+  `;
+  const result = await client.query(query);
+  await client.end();
+
+  // 2. Aggregate by price
+  const byPrice = {};
+  for (const row of result.rows) {
+    const price = parseFloat(row.price);
+    if (!byPrice[price]) byPrice[price] = { price, total_size: 0, total_volume: 0, total_premium: 0, days: new Set() };
+    byPrice[price].total_size += parseFloat(row.total_size);
+    byPrice[price].total_volume += parseFloat(row.total_volume);
+    byPrice[price].total_premium += parseFloat(row.total_premium);
+    byPrice[price].days.add(row.trade_day);
+  }
+
+  // 3. Build summary and filter for high confidence near spot
+  const summary = Object.values(byPrice).map(level => {
+    const daysAppeared = level.days.size;
+    return {
+      price: level.price,
+      avg_size: level.total_size / daysAppeared,
+      total_volume: level.total_volume,
+      total_premium: level.total_premium,
+      days_appeared: daysAppeared,
+      confidence: daysAppeared >= 3 ? 'High' : daysAppeared === 2 ? 'Medium' : 'Low'
+    };
+  });
+
+  // 4. Filter for high confidence and near spot price
+  return summary.filter(l => l.confidence === 'High' && Math.abs(l.price - spotPrice) <= proximity);
+}
+
+// -----------------------------------------------
 // Export
 // -----------------------------------------------
 module.exports = {
-  fetchAndStoreDarkPoolData
+  fetchAndStoreDarkPoolData,
+  getHighConfidenceLevelsNearSpot
 };

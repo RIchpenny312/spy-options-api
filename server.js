@@ -841,6 +841,24 @@ app.get('/api/darkpool/top', async (req, res) => {
   }
 });
 
+// 🔹 Fetch High Confidence Dark Pool Levels Near Spot Price
+app.get('/api/spy/darkpool/high-confidence-near-spot', async (req, res) => {
+  try {
+    const windowDays = parseInt(req.query.windowDays) || 3;
+    const spotPrice = parseFloat(req.query.spotPrice);
+    const proximity = parseFloat(req.query.proximity) || 1.0;
+    if (isNaN(spotPrice)) {
+      return res.status(400).json({ error: 'spotPrice query parameter is required and must be a number.' });
+    }
+    const { getHighConfidenceLevelsNearSpot } = require('./services/darkPoolService');
+    const levels = await getHighConfidenceLevelsNearSpot({ windowDays, spotPrice, proximity });
+    res.json(levels);
+  } catch (error) {
+    console.error('❌ Error fetching high confidence dark pool levels near spot:', error.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // 🔹 Fetch Rolling Averages for SPY Dark Pool Levels
 app.get('/api/spy/darkpool/rolling-averages', async (req, res) => {
   try {
