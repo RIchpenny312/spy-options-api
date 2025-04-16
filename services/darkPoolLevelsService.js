@@ -70,6 +70,52 @@ async function getTopDarkPoolLevels({ date = null, limit = 10 } = {}) {
   };
 }
 
+// Function to compute rolling averages for dark pool levels
+async function computeRollingAverages({ windowSize = 3 } = {}) {
+  const client = new Client(DB_CONFIG);
+  await client.connect();
+
+  const query = `
+    WITH rolling_data AS (
+      SELECT
+        price,
+        AVG(total_size) OVER (PARTITION BY price ORDER BY trading_day ROWS BETWEEN $1 PRECEDING AND CURRENT ROW) AS avg_size,
+        SUM(total_premium) OVER (PARTITION BY price ORDER BY trading_day ROWS BETWEEN $1 PRECEDING AND CURRENT ROW) AS total_premium,
+        SUM(total_volume) OVER (PARTITION BY price ORDER BY trading_day ROWS BETWEEN $1 PRECEDING AND CURRENT ROW) AS total_volume,
+        COUNT(DISTINCT trading_day) OVER (PARTITION BY price ORDER BY trading_day ROWS BETWEEN $1 PRECEDING AND CURRENT ROW) AS days_appeared
+      FROM spy_dark_pool_levels
+    )
+    SELECT
+      price,
+      avg_size,
+      total_premium,
+      total_volume,
+      days_appeared,
+      CASE
+        WHEN days_appeared >= 3 THEN 'High'
+        WHEN days_appeared = 2 THEN 'Medium'
+        ELSE 'Low'
+      END AS confidence
+    FROM rolling_data
+    WHERE days_appeared > 0
+    ORDER BY price;
+  `;
+
+  const result = await client.query(query, [windowSize - 1]);
+
+  await client.end();
+
+  return result.rows.map(row => ({
+    price: parseFloat(row.price),
+    avg_size: parseFloat(row.avg_size),
+    total_premium: parseFloat(row.total_premium),
+    total_volume: parseFloat(row.total_volume),
+    days_appeared: parseInt(row.days_appeared),
+    confidence: row.confidence
+  }));
+}
+
 module.exports = {
-  getTopDarkPoolLevels
+  getTopDarkPoolLevels,
+  computeRollingAverages
 };
