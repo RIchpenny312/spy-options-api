@@ -1169,6 +1169,103 @@ paths:
         "500":
           description: Internal Server Error
 
+  /api/spy/market-tide/historical:
+    get:
+      summary: Get Historical SPY Market Tide Data
+      operationId: getHistoricalMarketTide
+      description: Fetch historical SPY Market Tide data for a date range.
+      parameters:
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The start date for the query (YYYY-MM-DD). Defaults to 2000-01-01.
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The end date for the query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved historical market tide data.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    date:
+                      type: string
+                      format: date
+                    timestamp:
+                      type: string
+                      format: date-time
+                    net_call_premium:
+                      type: number
+                    net_put_premium:
+                      type: number
+                    net_volume:
+                      type: integer
+                    recorded_at:
+                      type: string
+                      format: date-time
+        "404":
+          description: No SPY Market Tide data found for the specified date range.
+        "500":
+          description: Internal Server Error
+
+  /api/spy/market-tide/historical/date:
+    get:
+      summary: Get All Market Tide Intervals for a Specific Date
+      operationId: getMarketTideIntervalsByDate
+      description: Fetch all Market Tide intervals for a specific date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: The trading date to query (YYYY-MM-DD). Defaults to today.
+      responses:
+        "200":
+          description: Successfully retrieved all Market Tide intervals for the date.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  intervals:
+                    type: integer
+                  market_tide:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        timestamp:
+                          type: string
+                          format: date-time
+                        net_call_premium:
+                          type: number
+                        net_put_premium:
+                          type: number
+                        net_volume:
+                          type: integer
+                        recorded_at:
+                          type: string
+                          format: date-time
+
 components:
   schemas:
     BidShiftSignal:

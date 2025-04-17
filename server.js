@@ -1068,6 +1068,27 @@ app.get('/api/spy/market-tide/net-premiums/intraday', async (req, res) => {
   }
 });
 
+// 🔹 Fetch all Market Tide intervals for a specific date (historical)
+app.get('/api/spy/market-tide/historical/date', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split("T")[0];
+    const query = `
+      SELECT *
+      FROM market_tide_data
+      WHERE date = $1
+      ORDER BY timestamp ASC;
+    `;
+    const data = await fetchData(query, [date]);
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: `No Market Tide data found for ${date}` });
+    }
+    res.json({ date, intervals: data.length, market_tide: data });
+  } catch (error) {
+    console.error(`❌ Error fetching Market Tide intervals for date:`, error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 // 🔹 Fetch Last 6 Delta Trends (Intraday)
 app.get('/api/spy/delta-trends/intraday', async (req, res) => {
   try {
