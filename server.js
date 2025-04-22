@@ -1141,6 +1141,54 @@ app.get('/api/spy/spot-gex/intraday', async (req, res) => {
   }
 });
 
+// --- VWAP Endpoints ---
+const { Pool } = require('pg');
+const vwapPool = new Pool(DB_CONFIG);
+
+// Intraday: Last 6 VWAP intervals (chronological)
+app.get('/api/spy/vwap/intraday', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const query = `
+      SELECT bucket_time, vwap
+      FROM spy_intraday_vwap
+      WHERE bucket_time::date = $1
+      ORDER BY bucket_time DESC
+      LIMIT 6;
+    `;
+    const { rows } = await vwapPool.query(query, [date]);
+    if (!rows.length) {
+      return res.status(404).json({ error: `No VWAP data found for ${date}` });
+    }
+    res.json(rows.reverse()); // chronological order
+  } catch (err) {
+    console.error('❌ Error fetching intraday VWAP:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Historical: All VWAP intervals for a specific date
+app.get('/api/spy/vwap/historical', async (req, res) => {
+  try {
+    const date = req.query.date;
+    if (!date) return res.status(400).json({ error: 'Missing required query param: date' });
+    const query = `
+      SELECT bucket_time, vwap
+      FROM spy_intraday_vwap
+      WHERE bucket_time::date = $1
+      ORDER BY bucket_time ASC;
+    `;
+    const { rows } = await vwapPool.query(query, [date]);
+    if (!rows.length) {
+      return res.status(404).json({ error: `No VWAP data found for ${date}` });
+    }
+    res.json(rows);
+  } catch (err) {
+    console.error('❌ Error fetching historical VWAP:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // ------------------------
 // ✅ Start Server
 // ------------------------
