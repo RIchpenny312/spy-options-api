@@ -1,63 +1,41 @@
-// VWAP Service: Calculate and store SPY 5-min intraday VWAP (CT-aligned)
+console.log("🧪 LIVE TEST: Using local DB for VWAP, no API call should occur");
+
 const db = require('./db');
-const { normalizeToBucket } = require('../utils/time');
-const dayjs = require('dayjs');
 
-// --- Retry wrapper for axios.get ---
-async function axiosGetWithRetry(url, options, retries = 3, delay = 2000) {
-  const axios = require('axios');
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await axios.get(url, options);
-    } catch (err) {
-      if (attempt === retries) throw err;
-      console.warn(`[VWAP Service][${new Date().toISOString()}] API request failed (attempt ${attempt}): ${err.message}`);
-      await new Promise(res => setTimeout(res, delay));
-    }
+// Fetch today's SPY OHLC 5-min data from local DB
+async function fetchOhlcFromDb() {
+  const query = `
+    SELECT bucket_time, close, volume
+    FROM spy_ohlc
+    WHERE bucket_time::date = CURRENT_DATE
+    ORDER BY bucket_time ASC;
+  `;
+  try {
+    const { rows } = await db.query(query);
+    const filtered = rows.filter(row => Number(row.volume) > 0);
+    console.log(`[VWAP Service][${new Date().toISOString()}] Fetched OHLC rows: ${filtered.length}`);
+    return filtered;
+  } catch (err) {
+    console.error(`[VWAP Service][${new Date().toISOString()}] Error fetching OHLC:`, err.message);
+    return [];
   }
-}
-
-// Fetch today's SPY OHLC 5-min data (from index.js logic)
-async function fetchSpyOhlcDataToday() {
-  const TIMEZONE = process.env.TIMEZONE || 'America/Chicago';
-  const today = dayjs().tz(TIMEZONE).format('YYYY-MM-DD');
-  const url = 'https://api.unusualwhales.com/api/stock/SPY/ohlc/5m';
-  const API_KEY = process.env.API_KEY;
-  const response = await axiosGetWithRetry(url, {
-    headers: { Authorization: `Bearer ${API_KEY}` },
-    timeout: 10000,
-  });
-  if (!response.data?.data || !Array.isArray(response.data.data)) return [];
-  const filtered = response.data.data
-    .filter(item => dayjs.utc(item.start_time).tz(TIMEZONE).format('YYYY-MM-DD') === today)
-    .map(item => ({
-      open: parseFloat(item.open) || 0,
-      high: parseFloat(item.high) || 0,
-      low: parseFloat(item.low) || 0,
-      close: parseFloat(item.close) || 0,
-      volume: parseInt(item.volume) || 0,
-      bucket_time: normalizeToBucket(item.start_time),
-    }));
-  console.log(`[VWAP Service][${new Date().toISOString()}] Fetched OHLC rows: ${filtered.length}`);
-  return filtered;
 }
 
 // Calculate cumulative VWAP series
 async function calculateVwap(ohlcData) {
-  // Defensive: filter out zero-volume candles
-  const filtered = ohlcData.filter(row => row.volume > 0);
+  console.log(`[VWAP Service][${new Date().toISOString()}] Calculating VWAP series...`);
   let cumulativePV = 0;
   let cumulativeVolume = 0;
   const vwapSeries = [];
-  for (const row of filtered) {
-    const price = parseFloat(row.close);
-    const volume = parseFloat(row.volume);
+  for (const row of ohlcData) {
+    const price = Number(row.close);
+    const volume = Number(row.volume);
     cumulativePV += price * volume;
     cumulativeVolume += volume;
     const vwap = cumulativeVolume > 0 ? cumulativePV / cumulativeVolume : 0;
     vwapSeries.push({
       bucket_time: row.bucket_time,
-      vwap: parseFloat(vwap.toFixed(4)),
+      vwap: Number(vwap.toFixed(4)),
     });
   }
   return vwapSeries;
@@ -82,16 +60,13 @@ async function storeVwap(vwapSeries) {
 // Standalone main for cron jobs
 async function main() {
   try {
-    const now = new Date().toISOString();
-    console.log(`[VWAP Service][${now}] Fetching today's OHLC data...`);
-    const ohlcData = await fetchSpyOhlcDataToday();
+    console.log(`[VWAP Service][${new Date().toISOString()}] Fetching today's OHLC data...`);
+    const ohlcData = await fetchOhlcFromDb();
     if (!ohlcData.length) {
       console.warn(`[VWAP Service][${new Date().toISOString()}] No OHLC data found for today.`);
       return;
     }
-    console.log(`[VWAP Service][${new Date().toISOString()}] Calculating VWAP series...`);
     const vwapSeries = await calculateVwap(ohlcData);
-    console.log(`[VWAP Service][${new Date().toISOString()}] Storing VWAP series into database...`);
     await storeVwap(vwapSeries);
     console.log(`[VWAP Service][${new Date().toISOString()}] VWAP calculation and storage complete.`);
   } catch (err) {
